@@ -188,7 +188,7 @@ def check_train_functionality():
         str(cli_path), "train",
         "--input", str(test_images_dir),
         "--output", str(model_output),
-        "--handler", "DemoTrainHandler",
+        "--handler", "demo_train",
         "--epochs", "1",
         "--validation-split", "0.2"
     ]
@@ -252,7 +252,7 @@ def check_evaluate_functionality():
         str(cli_path), "evaluate",
         "--target", str(test_images_dir),
         "--model", str(test_model),
-        "--handler", "DemoEvaluateHandler"
+        "--handler", "demo_evaluate"
     ]
 
     success, stdout, stderr = run_command(cmd)
@@ -284,8 +284,8 @@ def check_api_functionality():
         str(cli_path), "api",
         "--model", str(test_model),
         "--port", "54399",
-        "--handler", "DemoOCRHandler",
-        "--preprocess-handler", "DemoPreprocessHandler"
+        "--handler", "demo_ocr",
+        "--preprocess-handler", "demo_preprocess"
     ]
 
     print_info("啟動 API 服務...")

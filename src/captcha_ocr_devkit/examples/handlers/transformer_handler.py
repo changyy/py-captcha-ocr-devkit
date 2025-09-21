@@ -168,66 +168,82 @@ class Charset:
         return "".join(output)
 
 
-class ConvFeatureExtractor(nn.Module):
-    def __init__(self, in_channels: int = 1, out_dim: int = 256):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Conv2d(in_channels, 64, kernel_size=3, padding=1),
-            nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2, 2),
-            nn.Conv2d(64, 128, kernel_size=3, padding=1),
-            nn.BatchNorm2d(128),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2, 2),
-            nn.Conv2d(128, 256, kernel_size=3, padding=1),
-            nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d((2, 1), (2, 1)),
-        )
-        self.proj = nn.Linear(256, out_dim)
+if TORCH_AVAILABLE:
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        feat = self.net(x)
-        feat = feat.mean(dim=2, keepdim=True)
-        feat = feat.squeeze(2)
-        feat = feat.permute(0, 2, 1)
-        feat = self.proj(feat)
-        return feat
+    class ConvFeatureExtractor(nn.Module):
+        def __init__(self, in_channels: int = 1, out_dim: int = 256):
+            super().__init__()
+            self.net = nn.Sequential(
+                nn.Conv2d(in_channels, 64, kernel_size=3, padding=1),
+                nn.BatchNorm2d(64),
+                nn.ReLU(inplace=True),
+                nn.MaxPool2d(2, 2),
+                nn.Conv2d(64, 128, kernel_size=3, padding=1),
+                nn.BatchNorm2d(128),
+                nn.ReLU(inplace=True),
+                nn.MaxPool2d(2, 2),
+                nn.Conv2d(128, 256, kernel_size=3, padding=1),
+                nn.BatchNorm2d(256),
+                nn.ReLU(inplace=True),
+                nn.MaxPool2d((2, 1), (2, 1)),
+            )
+            self.proj = nn.Linear(256, out_dim)
 
-
-class PositionalEncoding(nn.Module):
-    def __init__(self, d_model: int, max_len: int = 2000):
-        super().__init__()
-        position = torch.arange(0, max_len).float().unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-torch.log(torch.tensor(10000.0)) / d_model))
-        pe = torch.zeros(max_len, d_model)
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0)
-        self.register_buffer("pe", pe)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        length = x.size(1)
-        return x + self.pe[:, :length]
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            feat = self.net(x)
+            feat = feat.mean(dim=2, keepdim=True)
+            feat = feat.squeeze(2)
+            feat = feat.permute(0, 2, 1)
+            feat = self.proj(feat)
+            return feat
 
 
-class OCRModel(nn.Module):
-    def __init__(self, num_classes: int, d_model: int = 256, num_layers: int = 2):
-        super().__init__()
-        self.backbone = ConvFeatureExtractor(out_dim=d_model)
-        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=4, dim_feedforward=512)
-        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-        self.positional_encoding = PositionalEncoding(d_model)
-        self.classifier = nn.Linear(d_model, num_classes)
+    class PositionalEncoding(nn.Module):
+        def __init__(self, d_model: int, max_len: int = 2000):
+            super().__init__()
+            position = torch.arange(0, max_len).float().unsqueeze(1)
+            div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-torch.log(torch.tensor(10000.0)) / d_model))
+            pe = torch.zeros(max_len, d_model)
+            pe[:, 0::2] = torch.sin(position * div_term)
+            pe[:, 1::2] = torch.cos(position * div_term)
+            pe = pe.unsqueeze(0)
+            self.register_buffer("pe", pe)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        feats = self.backbone(x)
-        feats = self.positional_encoding(feats)
-        feats = feats.permute(1, 0, 2)
-        encoded = self.encoder(feats)
-        logits = self.classifier(encoded)
-        return logits.permute(1, 0, 2)
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            length = x.size(1)
+            return x + self.pe[:, :length]
+
+
+    class OCRModel(nn.Module):
+        def __init__(self, num_classes: int, d_model: int = 256, num_layers: int = 2):
+            super().__init__()
+            self.backbone = ConvFeatureExtractor(out_dim=d_model)
+            encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=4, dim_feedforward=512)
+            self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+            self.positional_encoding = PositionalEncoding(d_model)
+            self.classifier = nn.Linear(d_model, num_classes)
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            feats = self.backbone(x)
+            feats = self.positional_encoding(feats)
+            feats = feats.permute(1, 0, 2)
+            encoded = self.encoder(feats)
+            logits = self.classifier(encoded)
+            return logits.permute(1, 0, 2)
+
+else:  # pragma: no cover - fallback when torch missing
+
+    class ConvFeatureExtractor:  # type: ignore[override]
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            raise RuntimeError("PyTorch is required for transformer handlers. Please install torch and torchvision.")
+
+    class PositionalEncoding:  # type: ignore[override]
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            raise RuntimeError("PyTorch is required for transformer handlers. Please install torch and torchvision.")
+
+    class OCRModel:  # type: ignore[override]
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            raise RuntimeError("PyTorch is required for transformer handlers. Please install torch and torchvision.")
 
 
 # ---------------------------------------------------------------------------
@@ -319,13 +335,14 @@ def build_charset_from_dataset(dataset: TransformerOCRDataset) -> Charset:
 
 
 def resolve_device(requested: Optional[str]) -> torch.device:
+    if not TORCH_AVAILABLE:
+        raise RuntimeError("PyTorch is required for transformer handlers. Please install torch and torchvision.")
     if requested and requested not in {"auto", ""}:
         return torch.device(requested)
-    if TORCH_AVAILABLE:
-        if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
-            return torch.device("mps")
-        if torch.cuda.is_available():  # pragma: no cover - depends on environment
-            return torch.device("cuda")
+    if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+        return torch.device("mps")
+    if torch.cuda.is_available():  # pragma: no cover - depends on environment
+        return torch.device("cuda")
     return torch.device("cpu")
 
 

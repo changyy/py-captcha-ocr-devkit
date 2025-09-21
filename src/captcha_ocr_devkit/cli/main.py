@@ -199,7 +199,7 @@ def api(model, host, port, handler, preprocess_handler, workers, reload):
         logger.info("🌐 啟動 API 服務模式")
 
         # 自動發現並選擇 handlers
-        default_ocr = handler or 'DemoOCRHandler'
+        default_ocr = handler or 'demo_ocr'
         selected_ocr_handler = auto_discover_and_select('ocr', default_ocr, interactive=False)
         if not selected_ocr_handler and handler is None:
             selected_ocr_handler = auto_discover_and_select('ocr', None, interactive=False)
@@ -214,7 +214,7 @@ def api(model, host, port, handler, preprocess_handler, workers, reload):
             if ocr_key.startswith('transformer'):
                 default_preprocess = 'transformer_preprocess'
             else:
-                default_preprocess = 'DemoPreprocessHandler'
+                default_preprocess = 'demo_preprocess'
 
         selected_preprocess_handler = auto_discover_and_select('preprocess', default_preprocess, interactive=False)
         if not selected_preprocess_handler and preprocess_handler is None:

@@ -50,7 +50,7 @@ class TestCompleteWorkflow:
             str(cli_path), "train",
             "--input", str(images_dir),
             "--output", str(model_file),
-            "--handler", "DemoTrainHandler",
+            "--handler", "demo_train",
             "--epochs", "1",
             "--validation-split", "0.2"
         ], capture_output=True, text=True, cwd=handlers_dir.parent)
@@ -69,7 +69,7 @@ class TestCompleteWorkflow:
             str(cli_path), "evaluate",
             "--target", str(images_dir),
             "--model", str(model_file),
-            "--handler", "DemoEvaluateHandler"
+            "--handler", "demo_evaluate"
         ], capture_output=True, text=True, cwd=handlers_dir.parent)
 
         assert result.returncode == 0, f"Evaluation failed: {result.stderr}"
@@ -94,8 +94,8 @@ class TestCompleteWorkflow:
             str(cli_path), "api",
             "--model", str(model_file),
             "--port", str(api_port),
-            "--handler", "DemoOCRHandler",
-            "--preprocess-handler", "DemoPreprocessHandler"
+            "--handler", "demo_ocr",
+            "--preprocess-handler", "demo_preprocess"
         ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=handlers_dir.parent)
 
         try:
@@ -162,10 +162,17 @@ from pathlib import Path
 discovered = registry.discover_handlers(Path('{handlers_dir}'))
 print('Discovered handlers:', discovered)
 
+id_map = {{
+    'preprocess': 'demo_preprocess',
+    'train': 'demo_train',
+    'evaluate': 'demo_evaluate',
+    'ocr': 'demo_ocr',
+}}
+
 # 測試每種類型的 handler 創建
-for handler_type in ['preprocess', 'train', 'evaluate', 'ocr']:
-    if f'Demo{{handler_type.title()}}Handler' in discovered[handler_type]:
-        handler = registry.create_handler(handler_type, f'Demo{{handler_type.title()}}Handler')
+for handler_type, handler_id in id_map.items():
+    if handler_id in discovered[handler_type]:
+        handler = registry.create_handler(handler_type, handler_id)
         print(f'Created {{handler_type}} handler:', handler.name)
         print(f'Handler info:', handler.get_info())
 """
@@ -175,10 +182,10 @@ for handler_type in ['preprocess', 'train', 'evaluate', 'ocr']:
         ], capture_output=True, text=True)
 
         assert result.returncode == 0, f"Handler discovery failed: {result.stderr}"
-        assert "DemoPreprocessHandler" in result.stdout
-        assert "DemoTrainHandler" in result.stdout
-        assert "DemoEvaluateHandler" in result.stdout
-        assert "DemoOCRHandler" in result.stdout
+        assert "demo_preprocess" in result.stdout
+        assert "demo_train" in result.stdout
+        assert "demo_evaluate" in result.stdout
+        assert "demo_ocr" in result.stdout
 
     def test_error_handling_workflow(self, cli_path: Path, temp_dir: Path):
         """測試錯誤處理工作流程"""
@@ -188,7 +195,7 @@ for handler_type in ['preprocess', 'train', 'evaluate', 'ocr']:
             str(cli_path), "train",
             "--input", str(temp_dir / "nonexistent"),
             "--output", str(temp_dir / "model.json"),
-            "--handler", "DemoTrainHandler"
+            "--handler", "demo_train"
         ], capture_output=True, text=True)
 
         assert result.returncode != 0
@@ -198,7 +205,7 @@ for handler_type in ['preprocess', 'train', 'evaluate', 'ocr']:
             str(cli_path), "evaluate",
             "--target", str(temp_dir),
             "--model", str(temp_dir / "nonexistent.json"),
-            "--handler", "DemoEvaluateHandler"
+            "--handler", "demo_evaluate"
         ], capture_output=True, text=True)
 
         assert result.returncode != 0
@@ -234,7 +241,7 @@ for handler_type in ['preprocess', 'train', 'evaluate', 'ocr']:
             str(cli_path), "train",
             "--input", str(images_dir),
             "--output", str(model_file),
-            "--handler", "DemoTrainHandler",
+            "--handler", "demo_train",
             "--epochs", "1"
         ], capture_output=True, text=True, cwd=handlers_dir.parent)
 
@@ -245,7 +252,7 @@ for handler_type in ['preprocess', 'train', 'evaluate', 'ocr']:
             str(cli_path), "evaluate",
             "--target", str(images_dir),
             "--model", str(model_file),
-            "--handler", "DemoEvaluateHandler"
+            "--handler", "demo_evaluate"
         ], capture_output=True, text=True, cwd=handlers_dir.parent)
 
         assert result.returncode == 0
@@ -270,7 +277,7 @@ for handler_type in ['preprocess', 'train', 'evaluate', 'ocr']:
             str(cli_path), "api",
             "--model", str(model_file),
             "--port", str(api_port),
-            "--handler", "DemoOCRHandler"
+            "--handler", "demo_ocr"
         ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=handlers_dir.parent)
 
         try:
@@ -332,7 +339,7 @@ class TestPerformanceIntegration:
             str(cli_path), "train",
             "--input", str(images_dir),
             "--output", str(model_file),
-            "--handler", "DemoTrainHandler",
+            "--handler", "demo_train",
             "--epochs", "1"
         ], capture_output=True, text=True, cwd=handlers_dir.parent)
 
@@ -374,7 +381,7 @@ class TestPerformanceIntegration:
             str(cli_path), "api",
             "--model", str(test_model),
             "--port", str(api_port),
-            "--handler", "DemoOCRHandler"
+            "--handler", "demo_ocr"
         ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=handlers_dir.parent)
 
         try:

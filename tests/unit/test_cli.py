@@ -145,7 +145,7 @@ class TestCLITrain:
             str(cli_path), "train",
             "--input", str(test_images_dir),
             "--output", str(output_model),
-            "--handler", "DemoTrainHandler",
+            "--handler", "demo_train",
             "--epochs", "1",
             "--validation-split", "0.2"
         ], capture_output=True, text=True, cwd=test_images_dir.parent)
@@ -196,7 +196,7 @@ class TestCLIEvaluate:
             str(cli_path), "evaluate",
             "--target", str(test_images_dir),
             "--model", str(test_model_file),
-            "--handler", "DemoEvaluateHandler"
+            "--handler", "demo_evaluate"
         ], capture_output=True, text=True, cwd=test_images_dir.parent)
 
         assert result.returncode == 0, f"Evaluate failed: {result.stderr}"

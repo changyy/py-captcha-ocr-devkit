@@ -377,10 +377,10 @@ def auto_discover_and_select(handler_type: str,
             return None
 
         preferred_defaults = {
-            'preprocess': 'DemoPreprocessHandler',
-            'train': 'DemoTrainHandler',
-            'evaluate': 'DemoEvaluateHandler',
-            'ocr': 'DemoOCRHandler'
+            'preprocess': 'demo_preprocess',
+            'train': 'demo_train',
+            'evaluate': 'demo_evaluate',
+            'ocr': 'demo_ocr'
         }
 
         preferred = preferred_defaults.get(handler_type)

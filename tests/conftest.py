@@ -154,8 +154,8 @@ def api_client():
     """FastAPI 測試客戶端"""
     # 需要先設定環境變數
     os.environ['CAPTCHA_MODEL_PATH'] = str(Path(__file__).parent.parent / "test_model.json")
-    os.environ['CAPTCHA_OCR_HANDLER'] = "DemoOCRHandler"
-    os.environ['CAPTCHA_PREPROCESS_HANDLER'] = "DemoPreprocessHandler"
+    os.environ['CAPTCHA_OCR_HANDLER'] = "demo_ocr"
+    os.environ['CAPTCHA_PREPROCESS_HANDLER'] = "demo_preprocess"
 
     from captcha_ocr_devkit.api.server import app
 
@@ -188,8 +188,8 @@ def sample_ocr_response() -> dict:
             "character_count": 4,
             "image_size": "128x64",
             "handler_info": {
-                "preprocess_handler": "DemoPreprocessHandler",
-                "ocr_handler": "DemoOCRHandler"
+                "preprocess_handler": "demo_preprocess",
+                "ocr_handler": "demo_ocr"
             },
             "warnings": [],
             "metadata_completeness": "full"

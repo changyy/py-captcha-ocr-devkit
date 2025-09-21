@@ -62,8 +62,8 @@ class OCRResponse(BaseModel):
                     "character_count": 4,
                     "image_size": "128x64",
                     "handler_info": {
-                        "preprocess_handler": "DemoPreprocessHandler",
-                        "ocr_handler": "DemoOCRHandler",
+                        "preprocess_handler": "demo_preprocess",
+                        "ocr_handler": "demo_ocr",
                     },
                     "warnings": [],
                     "metadata_completeness": "full",

@@ -37,37 +37,37 @@ class TestHandlerRegistry:
         assert "ocr" in discovered
 
         # 每個類型至少應該有 Demo handlers
-        assert "DemoPreprocessHandler" in discovered["preprocess"]
-        assert "DemoTrainHandler" in discovered["train"]
-        assert "DemoEvaluateHandler" in discovered["evaluate"]
-        assert "DemoOCRHandler" in discovered["ocr"]
+        assert "demo_preprocess" in discovered["preprocess"]
+        assert "demo_train" in discovered["train"]
+        assert "demo_evaluate" in discovered["evaluate"]
+        assert "demo_ocr" in discovered["ocr"]
 
     def test_handler_creation_demo_ocr(self, handlers_dir: Path):
         """測試 DemoOCRHandler 創建"""
         registry.discover_handlers(handlers_dir)
-        handler = registry.create_handler("ocr", "DemoOCRHandler")
+        handler = registry.create_handler("ocr", "demo_ocr")
 
         assert handler is not None
-        assert handler.name == "DemoOCRHandler"
+        assert handler.name == "demo_ocr"
 
         # 測試 get_info 方法
         info = handler.get_info()
         assert isinstance(info, dict)
         assert "name" in info
         assert "version" in info
-        assert info["name"] == "DemoOCRHandler"
+        assert info["name"] == "demo_ocr"
 
     def test_handler_creation_demo_preprocess(self, handlers_dir: Path):
         """測試 DemoPreprocessHandler 創建"""
         registry.discover_handlers(handlers_dir)
-        handler = registry.create_handler("preprocess", "DemoPreprocessHandler")
+        handler = registry.create_handler("preprocess", "demo_preprocess")
 
         assert handler is not None
-        assert handler.name == "DemoPreprocessHandler"
+        assert handler.name == "demo_preprocess"
 
         # 測試基本功能
         info = handler.get_info()
-        assert info["name"] == "DemoPreprocessHandler"
+        assert info["name"] == "demo_preprocess"
 
     def test_handler_creation_invalid(self, handlers_dir: Path):
         """測試無效 handler 創建"""
@@ -104,8 +104,8 @@ class TestHandlerBase:
     def test_demo_ocr_handler_predict(self, handlers_dir: Path):
         """測試 DemoOCRHandler 預測功能"""
         registry.discover_handlers(handlers_dir)
-        handler = registry.create_handler("ocr", "DemoOCRHandler")
-
+        handler = registry.create_handler("ocr", "demo_ocr")
+        
         # 測試預測
         fake_image = b"fake image data"
         result = handler.predict(fake_image)
@@ -124,7 +124,7 @@ class TestHandlerBase:
     def test_demo_ocr_handler_load_model(self, handlers_dir: Path, test_model_file: Path):
         """測試 DemoOCRHandler 模型載入"""
         registry.discover_handlers(handlers_dir)
-        handler = registry.create_handler("ocr", "DemoOCRHandler")
+        handler = registry.create_handler("ocr", "demo_ocr")
 
         # 測試模型載入
         success = handler.load_model(test_model_file)
@@ -138,7 +138,7 @@ class TestHandlerBase:
     def test_demo_preprocess_handler_process(self, handlers_dir: Path):
         """測試 DemoPreprocessHandler 處理功能"""
         registry.discover_handlers(handlers_dir)
-        handler = registry.create_handler("preprocess", "DemoPreprocessHandler")
+        handler = registry.create_handler("preprocess", "demo_preprocess")
 
         # 測試處理
         fake_image = b"fake image data"
@@ -180,7 +180,7 @@ class TestHandlerTraining:
     def test_demo_train_handler(self, handlers_dir: Path, test_images_dir: Path, temp_dir: Path):
         """測試 DemoTrainHandler 訓練功能"""
         registry.discover_handlers(handlers_dir)
-        handler = registry.create_handler("train", "DemoTrainHandler")
+        handler = registry.create_handler("train", "demo_train")
 
         from captcha_ocr_devkit.core.handlers.base import TrainingConfig
 
@@ -214,7 +214,7 @@ class TestHandlerTraining:
     def test_demo_evaluate_handler(self, handlers_dir: Path, test_images_dir: Path, test_model_file: Path):
         """測試 DemoEvaluateHandler 評估功能"""
         registry.discover_handlers(handlers_dir)
-        handler = registry.create_handler("evaluate", "DemoEvaluateHandler")
+        handler = registry.create_handler("evaluate", "demo_evaluate")
 
         # 執行評估
         result = handler.evaluate(test_model_file, test_images_dir)

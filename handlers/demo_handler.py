@@ -32,6 +32,7 @@ DEMO_HANDLER_VERSION = "1.20250919.1640"
 
 
 class DemoPreprocessHandler(BasePreprocessHandler):
+    HANDLER_ID = "demo_preprocess"
     """
     Demo 圖片預處理 Handler
 
@@ -78,7 +79,8 @@ class DemoPreprocessHandler(BasePreprocessHandler):
 
     def get_info(self):
         return {
-            "name": "DemoPreprocessHandler",
+            "name": self.name,
+            "handler_id": self.HANDLER_ID,
             "version": DEMO_HANDLER_VERSION,
             "description": "Demo 圖片預處理，純 random 模擬",
             "dependencies": [],
@@ -87,6 +89,7 @@ class DemoPreprocessHandler(BasePreprocessHandler):
 
 
 class DemoTrainHandler(BaseTrainHandler):
+    HANDLER_ID = "demo_train"
     """
     Demo 訓練 Handler
 
@@ -222,7 +225,8 @@ class DemoTrainHandler(BaseTrainHandler):
 
     def get_info(self):
         return {
-            "name": "DemoTrainHandler",
+            "name": self.name,
+            "handler_id": self.HANDLER_ID,
             "version": DEMO_HANDLER_VERSION,
             "description": "Demo 訓練，純 random 模擬訓練過程",
             "dependencies": [],
@@ -231,6 +235,7 @@ class DemoTrainHandler(BaseTrainHandler):
 
 
 class DemoEvaluateHandler(BaseEvaluateHandler):
+    HANDLER_ID = "demo_evaluate"
     """
     Demo 評估 Handler
 
@@ -379,7 +384,8 @@ class DemoEvaluateHandler(BaseEvaluateHandler):
 
     def get_info(self):
         return {
-            "name": "DemoEvaluateHandler",
+            "name": self.name,
+            "handler_id": self.HANDLER_ID,
             "version": DEMO_HANDLER_VERSION,
             "description": "Demo 評估，純 random 模擬評估過程",
             "dependencies": [],
@@ -388,6 +394,7 @@ class DemoEvaluateHandler(BaseEvaluateHandler):
 
 
 class DemoOCRHandler(BaseOCRHandler):
+    HANDLER_ID = "demo_ocr"
     """
     Demo OCR Handler
 
@@ -476,7 +483,8 @@ class DemoOCRHandler(BaseOCRHandler):
 
     def get_info(self):
         info = {
-            "name": "DemoOCRHandler",
+            "name": self.name,
+            "handler_id": self.HANDLER_ID,
             "version": DEMO_HANDLER_VERSION,
             "description": "Demo OCR，純 random 模擬識別",
             "dependencies": [],
@@ -499,10 +507,10 @@ class DemoOCRHandler(BaseOCRHandler):
 def check_demo_handlers():
     """檢查 Demo Handlers 可用性"""
     print("🎯 Demo Handlers 狀態檢查")
-    print("✅ DemoPreprocessHandler - 純 Python，無依賴")
-    print("✅ DemoTrainHandler - 純 Python，無依賴")
-    print("✅ DemoEvaluateHandler - 純 Python，無依賴")
-    print("✅ DemoOCRHandler - 純 Python，無依賴")
+    print("✅ demo_preprocess (DemoPreprocessHandler) - 純 Python，無依賴")
+    print("✅ demo_train (DemoTrainHandler) - 純 Python，無依賴")
+    print("✅ demo_evaluate (DemoEvaluateHandler) - 純 Python，無依賴")
+    print("✅ demo_ocr (DemoOCRHandler) - 純 Python，無依賴")
     print("🎲 所有功能都是 random 模擬，適合教學和測試")
     return True
 
