@@ -1,0 +1,18 @@
+{
+  "model_type": "simple_mock",
+  "training_config": {
+    "epochs": 100,
+    "batch_size": 32,
+    "learning_rate": 0.001
+  },
+  "dataset_info": {
+    "total_images": 3,
+    "unique_labels": 3,
+    "labels": [
+      "ijkl",
+      "efgh",
+      "abcd"
+    ]
+  },
+  "training_time": 0.5220091342926025
+}

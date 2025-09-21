@@ -1,0 +1,1 @@
+../ai-helper/python/py-captcha-ocr-devkit/CLAUDE.md

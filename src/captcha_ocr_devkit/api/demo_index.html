@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎯 CAPTCHA API 測試工具</title>
+    <style>
+        *, *::before, *::after {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 20px;
+            background: #f8f9fa;
+            color: #333;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        .version-badge {
+            display: inline-block;
+            margin-top: 12px;
+            padding: 6px 14px;
+            background: rgba(255, 255, 255, 0.25);
+            border-radius: 999px;
+            font-size: 13px;
+            color: #ffffff;
+            backdrop-filter: blur(4px);
+            transition: background 0.3s ease, color 0.3s ease;
+        }
+        .version-badge strong {
+            margin: 0 4px;
+        }
+        .version-badge.healthy {
+            background: rgba(40, 167, 69, 0.2);
+            color: #e6ffed;
+        }
+        .version-badge.unhealthy {
+            background: rgba(220, 53, 69, 0.25);
+            color: #ffe6e9;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+        }
+        .section h3 {
+            margin-top: 0;
+            color: #555;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 10px;
+        }
+        .upload-area {
+            border: 2px dashed #ddd;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            background: #fafafa;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            position: relative;
+            overflow: hidden;
+        }
+        .upload-area:hover {
+            border-color: #667eea;
+            background: #f0f2ff;
+        }
+        .upload-area.dragover {
+            border-color: #667eea;
+            background: #e8ecff;
+        }
+        input[type="file"] {
+            display: none;
+        }
+        .upload-icon {
+            font-size: 48px;
+            margin-bottom: 10px;
+            opacity: 0.5;
+        }
+        .btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            margin: 5px;
+        }
+        .btn:hover {
+            background: #5a6fd8;
+            transform: translateY(-1px);
+        }
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .btn-secondary {
+            background: #6c757d;
+        }
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+        .settings {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .setting-group {
+            display: flex;
+            flex-direction: column;
+        }
+        label {
+            font-weight: 500;
+            margin-bottom: 5px;
+            color: #555;
+        }
+        input[type="number"], select {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        #selectedImage {
+            max-width: 100%;
+            border-radius: 6px;
+            margin-top: 15px;
+            display: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+        .result-container {
+            margin-top: 20px;
+            padding: 20px;
+            border-radius: 8px;
+            background: #f1f5f9;
+            border: 1px solid #e2e8f0;
+        }
+        .result-container h4 {
+            margin: 0 0 10px 0;
+            color: #475569;
+        }
+        .result-text {
+            font-size: 28px;
+            font-weight: bold;
+            letter-spacing: 4px;
+            text-align: center;
+            margin: 15px 0;
+            color: #1f2937;
+        }
+        .confidence-bar {
+            height: 12px;
+            background: #e2e8f0;
+            border-radius: 999px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        .confidence-fill {
+            height: 100%;
+            background: linear-gradient(135deg, #43cea2 0%, #185a9d 100%);
+            border-radius: 999px;
+        }
+        .details {
+            margin-top: 15px;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        pre {
+            background: #1f2937;
+            color: #e2e8f0;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+        }
+        .api-endpoints ul {
+            list-style: none;
+            padding: 0;
+        }
+        .api-endpoints li {
+            padding: 10px;
+            margin: 10px 0;
+            background: #f8fafc;
+            border-radius: 6px;
+            border-left: 4px solid #667eea;
+        }
+        .example-box {
+            background: #fff7ed;
+            border: 1px solid #fdba74;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+        .loading {
+            display: inline-block;
+            width: 18px;
+            height: 18px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 6px;
+            vertical-align: middle;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🎯 CAPTCHA OCR API 測試工具</h1>
+        <p>上傳驗證碼圖片，快速測試 API 的識別結果</p>
+        <div id="versionBadge" class="version-badge">版本資訊載入中...</div>
+    </div>
+
+    <div class="container">
+        <div class="section">
+            <h3>1. 上傳驗證碼圖片</h3>
+            <label for="captchaFile" class="upload-area" id="uploadArea">
+                <div class="upload-icon">📁</div>
+                <div>點擊或拖曳圖片到此處</div>
+                <div style="font-size: 13px; color: #6b7280; margin-top: 6px;">支援 PNG / JPG / JPEG / BMP</div>
+            </label>
+            <input type="file" id="captchaFile" accept="image/*">
+            <img id="selectedImage" alt="選擇的驗證碼圖片">
+            <div style="margin-top: 10px; display: none;" id="imageInfo"></div>
+        </div>
+
+        <div class="section">
+            <h3>2. API 設定與識別</h3>
+            <div class="settings">
+                <div class="setting-group">
+                    <label for="apiUrl">API 端點</label>
+                    <input type="text" id="apiUrl" value="http://127.0.0.1:54321/api/v1/ocr">
+                </div>
+                <div class="setting-group">
+                    <label for="captchaLength">驗證碼長度</label>
+                    <input type="number" id="captchaLength" value="4" min="1" max="10">
+                </div>
+                <div class="setting-group">
+                    <label for="captchaType">字符類型</label>
+                    <select id="captchaType">
+                        <option value="alphanumeric" selected>數字 + 字母</option>
+                        <option value="numeric">僅數字</option>
+                        <option value="alphabetic">僅字母</option>
+                    </select>
+                </div>
+                <div class="setting-group">
+                    <label for="segmentationMethod">分割方法</label>
+                    <select id="segmentationMethod">
+                        <option value="auto" selected>自動偵測</option>
+                        <option value="projection">投影法</option>
+                        <option value="connected">連通元件</option>
+                    </select>
+                </div>
+            </div>
+            <button class="btn" id="recognizeBtn">🔍 識別驗證碼</button>
+            <button class="btn btn-secondary" id="resetBtn">♻️ 清除設定</button>
+        </div>
+
+        <div class="section">
+            <h3>3. 識別結果</h3>
+            <div class="result-container" id="resultContainer">
+                <p style="margin: 0; color: #64748b;">請上傳驗證碼圖片並點擊「識別驗證碼」查看結果。</p>
+            </div>
+        </div>
+
+        <div class="section">
+            <h3>API 端點資訊</h3>
+            <div class="api-endpoints">
+                <ul>
+                    <li>
+                        <strong>POST /api/v1/ocr</strong>
+                        <div>表單欄位: <code>file</code> (multipart/form-data)</div>
+                        <div>回應: JSON，包含 <code>status</code>、<code>data</code>、<code>confidence</code>、<code>details</code> 等欄位</div>
+                    </li>
+                    <li>
+                        <strong>GET /api/v1/health</strong>
+                        <div>回應: 系統健康狀態、模型載入資訊、服務版本</div>
+                    </li>
+                    <li>
+                        <strong>GET /api/v1/stats</strong>
+                        <div>回應: 請求統計、成功率、平均處理時間</div>
+                    </li>
+                </ul>
+            </div>
+
+            <div class="example-box">
+                <h4>curl 範例</h4>
+                <pre>curl -X POST "http://127.0.0.1:54321/api/v1/ocr" \
+  -H "accept: application/json" \
+  -H "Content-Type: multipart/form-data" \
+  -F "file=@your_captcha.png"</pre>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const DEFAULT_IMAGE = null;
+
+        class CaptchaAPITester {
+            constructor() {
+                this.fileInput = document.getElementById('captchaFile');
+                this.uploadArea = document.getElementById('uploadArea');
+                this.selectedImage = document.getElementById('selectedImage');
+                this.imageInfo = document.getElementById('imageInfo');
+                this.resultContainer = document.getElementById('resultContainer');
+                this.recognizeBtn = document.getElementById('recognizeBtn');
+                this.resetBtn = document.getElementById('resetBtn');
+                this.apiUrlInput = document.getElementById('apiUrl');
+                this.versionBadge = document.getElementById('versionBadge');
+                this.currentImageData = null;
+                this.currentFile = null;
+
+                this.initEventListeners();
+                this.loadDefaultImage();
+                this.loadVersionInfo();
+            }
+
+            initEventListeners() {
+                this.fileInput.addEventListener('change', (e) => this.handleFileUpload(e.target.files[0]));
+
+                this.uploadArea.addEventListener('click', () => this.fileInput.click());
+
+                this.uploadArea.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    this.uploadArea.classList.add('dragover');
+                });
+
+                this.uploadArea.addEventListener('dragleave', () => {
+                    this.uploadArea.classList.remove('dragover');
+                });
+
+                this.uploadArea.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    this.uploadArea.classList.remove('dragover');
+                    if (e.dataTransfer.files.length > 0) {
+                        this.handleFileUpload(e.dataTransfer.files[0]);
+                    }
+                });
+
+                this.recognizeBtn.addEventListener('click', () => this.recognizeCaptcha());
+                this.resetBtn.addEventListener('click', () => this.resetSettings());
+                this.apiUrlInput.addEventListener('change', () => this.loadVersionInfo());
+            }
+
+            loadDefaultImage() {
+                if (!DEFAULT_IMAGE) {
+                    this.selectedImage.style.display = 'none';
+                    this.imageInfo.style.display = 'none';
+                    this.currentImageData = null;
+                    this.currentFile = null;
+                    return;
+                }
+
+                const img = new Image();
+                img.src = DEFAULT_IMAGE;
+                img.onload = () => {
+                    this.setImage(img.src, 'sample_captcha.png', img.width, img.height);
+                    this.currentFile = null;
+                };
+            }
+
+            async loadVersionInfo() {
+                if (!this.versionBadge) {
+                    return;
+                }
+
+                const apiUrlValue = this.apiUrlInput.value.trim();
+                let healthUrl;
+                try {
+                    const url = new URL(apiUrlValue);
+                    url.pathname = '/api/v1/health';
+                    url.search = '';
+                    healthUrl = url.toString();
+                } catch (error) {
+                    this.versionBadge.textContent = '無法解析 API URL';
+                    this.versionBadge.classList.remove('healthy');
+                    this.versionBadge.classList.add('unhealthy');
+                    this.recognizeBtn.disabled = true;
+                    this.recognizeBtn.title = '請先設定正確的 API URL';
+                    return;
+                }
+
+                this.versionBadge.textContent = '版本資訊載入中...';
+                this.versionBadge.classList.remove('healthy', 'unhealthy');
+                this.recognizeBtn.disabled = true;
+                this.recognizeBtn.title = '等待 API 健康檢查結果...';
+
+                try {
+                    const response = await fetch(healthUrl, {
+                        signal: AbortSignal.timeout(7000)
+                    });
+
+                    if (!response.ok) {
+                        this.versionBadge.textContent = `版本查詢失敗 (HTTP ${response.status})`;
+                        this.versionBadge.classList.add('unhealthy');
+                        return;
+                    }
+
+                    const data = await response.json();
+                    const coreVersion = data.version || '未知';
+                    const handlerVersions = data.handler_versions || {};
+                    const handlerText = Object.entries(handlerVersions)
+                        .map(([key, value]) => `${key}: ${value}`)
+                        .join('｜');
+                    const isHealthy = data.status === 'healthy' && data.model_loaded === true;
+
+                    this.versionBadge.innerHTML = handlerText
+                        ? `核心 <strong>${coreVersion}</strong>｜${handlerText}`
+                        : `核心 <strong>${coreVersion}</strong>`;
+
+                    if (isHealthy) {
+                        this.versionBadge.classList.add('healthy');
+                        this.recognizeBtn.disabled = false;
+                        this.recognizeBtn.title = '';
+                    } else {
+                        const statusLabel = data.status === 'healthy' && !data.model_loaded ? '模型尚未載入' : 'API 未就緒';
+                        this.versionBadge.classList.add('unhealthy');
+                        this.versionBadge.innerHTML += `｜${statusLabel}`;
+                        this.recognizeBtn.disabled = true;
+                        this.recognizeBtn.title = 'API 尚未就緒';
+                    }
+                } catch (error) {
+                    this.versionBadge.textContent = '版本查詢失敗';
+                    this.versionBadge.classList.add('unhealthy');
+                    this.recognizeBtn.disabled = true;
+                    this.recognizeBtn.title = 'API 連線失敗';
+                }
+            }
+
+            resetSettings() {
+                this.apiUrlInput.value = 'http://127.0.0.1:54321/api/v1/ocr';
+                document.getElementById('captchaLength').value = 4;
+                document.getElementById('captchaType').value = 'alphanumeric';
+                document.getElementById('segmentationMethod').value = 'auto';
+                this.loadDefaultImage();
+                this.resultContainer.innerHTML = '<p style="margin: 0; color: #64748b;">設定已重置，請上傳驗證碼圖片或使用預設範例。</p>';
+                this.currentFile = null;
+                this.loadVersionInfo();
+            }
+
+            handleFileUpload(file) {
+                if (!file) return;
+
+                if (!file.type.startsWith('image/')) {
+                    alert('請上傳圖片檔案！');
+                    return;
+                }
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    this.currentFile = file;
+                    this.setImage(e.target.result, file.name, null, null);
+                };
+                reader.readAsDataURL(file);
+            }
+
+            setImage(dataUrl, fileName, width, height) {
+                this.currentImageData = dataUrl;
+                this.selectedImage.src = dataUrl;
+                this.selectedImage.style.display = 'block';
+
+                const info = [`📄 檔案：${fileName}`];
+                if (width && height) {
+                    info.push(`📐 尺寸：${width} x ${height}`);
+                }
+                this.imageInfo.style.display = 'block';
+                this.imageInfo.innerHTML = info.join('<br>');
+            }
+
+            async recognizeCaptcha() {
+                if (!this.currentFile && !this.currentImageData) {
+                    alert('請先上傳圖片！');
+                    return;
+                }
+
+                const apiUrl = this.apiUrlInput.value.trim();
+                const captchaLength = parseInt(document.getElementById('captchaLength').value);
+                const captchaType = document.getElementById('captchaType').value;
+                const segmentationMethod = document.getElementById('segmentationMethod').value;
+
+                this.recognizeBtn.disabled = true;
+                this.recognizeBtn.innerHTML = '<span class="loading"></span>識別中...';
+                
+                this.resultContainer.innerHTML = '<div style="text-align: center; padding: 20px;"><span class="loading"></span>正在識別驗證碼...</div>';
+
+                const startTime = Date.now();
+
+                try {
+                    let uploadFile = this.currentFile;
+
+                    if (!uploadFile && this.currentImageData) {
+                        const blob = await fetch(this.currentImageData).then(res => res.blob());
+                        uploadFile = new File([blob], 'sample_captcha.png', { type: blob.type || 'image/png' });
+                    }
+
+                    if (!uploadFile) {
+                        throw new Error('沒有可用的圖片檔案');
+                    }
+
+                    const formData = new FormData();
+                    formData.append('file', uploadFile);
+                    formData.append('password', String(captchaLength));
+                    formData.append('captcha_type', captchaType);
+                    formData.append('segmentation_method', segmentationMethod);
+
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        body: formData,
+                        signal: AbortSignal.timeout(30000)
+                    });
+
+                    const processingTime = (Date.now() - startTime) / 1000;
+
+                    if (response.ok) {
+                        const result = await response.json();
+                        this.displayResult(result, processingTime);
+                    } else {
+                        const errorText = await response.text();
+                        this.displayError(`HTTP ${response.status}: ${errorText}`);
+                    }
+                } catch (error) {
+                    if (error.name === 'AbortError') {
+                        this.displayError('請求超時 (30秒)');
+                    } else {
+                        this.displayError(`請求失敗: ${error.message}`);
+                    }
+                } finally {
+                    this.recognizeBtn.disabled = false;
+                    this.recognizeBtn.innerHTML = '🔍 識別驗證碼';
+                }
+            }
+
+            displayResult(result, clientProcessingTime) {
+                const isSuccess = result.status === true;
+                const containerClass = isSuccess ? 'result-success' : 'result-error';
+                
+                let resultHtml = `<div class="result-container ${containerClass}">`;
+                
+                if (isSuccess) {
+                    resultHtml += '<h4 style="margin-top: 0; color: #28a745;">✅ 識別成功</h4>';
+                    resultHtml += `<div class="result-text">${result.data || '無結果'}</div>`;
+                    
+                    const confidence = result.confidence || 0;
+                    resultHtml += `<div style="margin: 15px 0;">`;
+                    resultHtml += `<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">`;
+                    resultHtml += `<span>信心度:</span><span><strong>${confidence.toFixed(1)}%</strong></span>`;
+                    resultHtml += `</div>`;
+                    resultHtml += `<div class="confidence-bar">`;
+                    resultHtml += `<div class="confidence-fill" style="width: ${confidence}%"></div>`;
+                    resultHtml += `</div>`;
+                    resultHtml += `</div>`;
+                } else {
+                    resultHtml += '<h4 style="margin-top: 0; color: #dc3545;">❌ 識別失敗</h4>';
+                    resultHtml += `<p style="color: #dc3545;">${result.message || '未知錯誤'}</p>`;
+                }
+
+                resultHtml += '<div class="details">';
+                resultHtml += `<div><strong>處理時間:</strong> ${(result.processing_time || clientProcessingTime).toFixed(3)}秒</div>`;
+                resultHtml += `<div><strong>識別方法:</strong> ${result.method || 'unknown'}</div>`;
+                resultHtml += `<div><strong>時間戳:</strong> ${result.timestamp ? new Date(result.timestamp).toLocaleString() : '無'}</div>`;
+                
+                if (result.details) {
+                    if (result.details.character_confidences) {
+                        resultHtml += `<div><strong>字符信心度:</strong> ${result.details.character_confidences.map(c => c.toFixed(1)).join(', ')}%</div>`;
+                    }
+                    if (result.details.captcha_length) {
+                        resultHtml += `<div><strong>驗證碼長度:</strong> ${result.details.captcha_length}位</div>`;
+                    }
+                    if (result.details.captcha_type) {
+                        resultHtml += `<div><strong>字符類型:</strong> ${result.details.captcha_type}</div>`;
+                    }
+                    if (result.details.segmentation_method) {
+                        resultHtml += `<div><strong>分割方法:</strong> ${result.details.segmentation_method}</div>`;
+                    }
+                }
+                
+                resultHtml += '</div>';
+                resultHtml += '</div>';
+
+                this.resultContainer.innerHTML = resultHtml;
+            }
+
+            displayError(errorMessage) {
+                this.resultContainer.innerHTML = `
+                    <div class="result-container result-error">
+                        <h4 style="margin-top: 0; color: #dc3545;">❌ 請求失敗</h4>
+                        <p style="color: #dc3545;">${errorMessage}</p>
+                    </div>
+                `;
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            new CaptchaAPITester();
+        });
+    </script>
+</body>
+</html>
