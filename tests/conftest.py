@@ -140,7 +140,14 @@ def handlers_dir(temp_dir: Path, cli_path: Path) -> Path:
     handlers_dir = temp_dir / "handlers"
 
     # 使用 init 命令創建 handlers
-    cmd = [str(cli_path), "init", "--output-dir", str(handlers_dir), "--force"]
+    cmd = [
+        str(cli_path),
+        "init",
+        "--output-dir",
+        str(handlers_dir),
+        "--force",
+        "--no-scripts",
+    ]
     result = subprocess.run(cmd, capture_output=True, text=True)
 
     if result.returncode != 0:

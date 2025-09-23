@@ -9,20 +9,6 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
-try:
-    import numpy as np
-    NUMPY_AVAILABLE = True
-except ImportError:  # pragma: no cover - optional dependency
-    np = None  # type: ignore
-    NUMPY_AVAILABLE = False
-
-try:
-    from PIL import Image
-    PIL_AVAILABLE = True
-except ImportError:  # pragma: no cover - optional dependency
-    Image = None  # type: ignore
-    PIL_AVAILABLE = False
-
 from captcha_ocr_devkit.core.handlers.base import (
     BaseEvaluateHandler,
     BaseOCRHandler,
@@ -33,87 +19,44 @@ from captcha_ocr_devkit.core.handlers.base import (
     TrainingConfig,
 )
 
-TRANSFORMER_HANDLER_VERSION = "1.20250919.1700"
-TRANSFORMER_DEPENDENCIES = ["torch", "torchvision", "pillow", "numpy"]
-TRANSFORMER_REQUIREMENTS_FILE = "transformer_handler-requirements.txt"
-TRANSFORMER_INSTALL_FALLBACK = "pip install torch torchvision pillow numpy"
-
-try:
-    import torch
-    import torch.nn as nn
-    import torch.optim as optim
-    from torch.utils.data import DataLoader, Dataset, random_split
-
-    TORCH_AVAILABLE = True
-except ImportError:  # pragma: no cover - optional dependency
-    TORCH_AVAILABLE = False
-    torch = None  # type: ignore
-    nn = None  # type: ignore
-    optim = None  # type: ignore
-    DataLoader = None  # type: ignore
-    Dataset = object  # type: ignore
-    random_split = None  # type: ignore
-
+from captcha_ocr_devkit.examples.handlers.ocr_common import (
+    Charset,
+    ConvFeatureExtractor,
+    OCRDataset,
+    TorchHandlerDependencyMixin,
+    _missing_dependencies,
+    build_charset_from_dataset,
+    collate_batch,
+    evaluate_model,
+    greedy_decode_batch,
+    labels_to_targets,
+    levenshtein,
+    resolve_device,
+    set_seed,
+    Image,
+    np,
+    torch,
+    nn,
+    optim,
+    DataLoader,
+    random_split,
+    NUMPY_AVAILABLE,
+    PIL_AVAILABLE,
+    TORCH_AVAILABLE,
+)
 
 # ---------------------------------------------------------------------------
 # Dependency helpers
 # ---------------------------------------------------------------------------
 
+TRANSFORMER_HANDLER_VERSION = "1.20250919.1700"
+TRANSFORMER_DEPENDENCIES = ["torch", "torchvision", "pillow", "numpy"]
+TRANSFORMER_REQUIREMENTS_FILE = "transformer_handler-requirements.txt"
+TRANSFORMER_INSTALL_FALLBACK = "pip install torch torchvision pillow numpy"
 
-def _requirements_path(override: Optional[Union[str, Path]] = None) -> Path:
-    module_dir = Path(__file__).resolve().parent
-    if override:
-        path = Path(override)
-        if not path.is_absolute():
-            path = module_dir / path
-        return path
-    return module_dir / TRANSFORMER_REQUIREMENTS_FILE
-
-
-def _install_hint(override: Optional[Union[str, Path]] = None) -> str:
-    req_path = _requirements_path(override)
-    if req_path.exists():
-        try:
-            display_path = req_path.relative_to(Path.cwd())
-        except ValueError:  # pragma: no cover - path outside cwd
-            display_path = req_path
-        return f"pip install -r {display_path}"
-    return TRANSFORMER_INSTALL_FALLBACK
-
-
-def _format_dependency_error(missing: Sequence[str], override: Optional[Union[str, Path]] = None) -> str:
-    missing_str = ", ".join(missing)
-    hint = _install_hint(override)
-    return f"缺少必要套件: {missing_str}. 請先執行 {hint}。"
-
-
-def _missing_dependencies(require_torch: bool = True) -> List[str]:
-    missing: List[str] = []
-    if require_torch and not TORCH_AVAILABLE:
-        missing.extend(["torch", "torchvision"])
-    if not NUMPY_AVAILABLE:
-        missing.append("numpy")
-    if not PIL_AVAILABLE:
-        missing.append("Pillow")
-    return missing
-
-
-class TransformerDependencyMixin:
-    """Utility helpers for dependency-aware handlers."""
-
-    config: Dict[str, Any]
-
-    def _requirements_override(self) -> Optional[Union[str, Path]]:
-        return self.config.get("requirements_file") if isinstance(self.config, dict) else None
-
-    def _install_hint(self) -> str:
-        return _install_hint(self._requirements_override())
-
-    def _dependency_error_message(self, missing: Sequence[str]) -> str:
-        return _format_dependency_error(missing, self._requirements_override())
-
-    def _requirements_file_path(self) -> Path:
-        return _requirements_path(self._requirements_override())
+class TransformerDependencyMixin(TorchHandlerDependencyMixin):
+    REQUIREMENTS_FILE = TRANSFORMER_REQUIREMENTS_FILE
+    INSTALL_FALLBACK = TRANSFORMER_INSTALL_FALLBACK
 
 
 LOGGER = logging.getLogger(__name__)
@@ -127,76 +70,10 @@ if LOGGER.getEffectiveLevel() > logging.INFO:
 
 
 # ---------------------------------------------------------------------------
-# Helper classes reused from reference script
+# Model components
 # ---------------------------------------------------------------------------
 
-
-class Charset:
-    """Simple character set helper mirroring the reference script."""
-
-    BLANK_SYMBOL = "<blank>"
-
-    def __init__(self, itos: List[str]):
-        if not itos:
-            raise ValueError("Charset cannot be empty")
-        if itos[0] != self.BLANK_SYMBOL:
-            raise ValueError("First entry of charset must be '<blank>'")
-        self.itos = itos
-        self.stoi = {ch: idx for idx, ch in enumerate(itos)}
-        self.blank_idx = 0
-
-    @classmethod
-    def from_characters(cls, chars: Sequence[str]) -> "Charset":
-        unique = sorted(set(chars))
-        return cls([cls.BLANK_SYMBOL] + unique)
-
-    @property
-    def size(self) -> int:
-        return len(self.itos)
-
-    def encode(self, text: str) -> List[int]:
-        return [self.stoi[ch] for ch in text if ch in self.stoi]
-
-    def decode_greedy(self, logits: torch.Tensor) -> str:
-        indices = logits.argmax(dim=-1).tolist()
-        output: List[str] = []
-        prev = None
-        for idx in indices:
-            if idx != self.blank_idx and idx != prev:
-                output.append(self.itos[idx])
-            prev = idx
-        return "".join(output)
-
-
 if TORCH_AVAILABLE:
-
-    class ConvFeatureExtractor(nn.Module):
-        def __init__(self, in_channels: int = 1, out_dim: int = 256):
-            super().__init__()
-            self.net = nn.Sequential(
-                nn.Conv2d(in_channels, 64, kernel_size=3, padding=1),
-                nn.BatchNorm2d(64),
-                nn.ReLU(inplace=True),
-                nn.MaxPool2d(2, 2),
-                nn.Conv2d(64, 128, kernel_size=3, padding=1),
-                nn.BatchNorm2d(128),
-                nn.ReLU(inplace=True),
-                nn.MaxPool2d(2, 2),
-                nn.Conv2d(128, 256, kernel_size=3, padding=1),
-                nn.BatchNorm2d(256),
-                nn.ReLU(inplace=True),
-                nn.MaxPool2d((2, 1), (2, 1)),
-            )
-            self.proj = nn.Linear(256, out_dim)
-
-        def forward(self, x: torch.Tensor) -> torch.Tensor:
-            feat = self.net(x)
-            feat = feat.mean(dim=2, keepdim=True)
-            feat = feat.squeeze(2)
-            feat = feat.permute(0, 2, 1)
-            feat = self.proj(feat)
-            return feat
-
 
     class PositionalEncoding(nn.Module):
         def __init__(self, d_model: int, max_len: int = 2000):
@@ -233,10 +110,6 @@ if TORCH_AVAILABLE:
 
 else:  # pragma: no cover - fallback when torch missing
 
-    class ConvFeatureExtractor:  # type: ignore[override]
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
-            raise RuntimeError("PyTorch is required for transformer handlers. Please install torch and torchvision.")
-
     class PositionalEncoding:  # type: ignore[override]
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             raise RuntimeError("PyTorch is required for transformer handlers. Please install torch and torchvision.")
@@ -247,113 +120,8 @@ else:  # pragma: no cover - fallback when torch missing
 
 
 # ---------------------------------------------------------------------------
-# Dataset and training utilities adapted from reference script
+# Training utilities adapted from reference script
 # ---------------------------------------------------------------------------
-
-SUPPORTED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp"}
-
-
-def set_seed(seed: Optional[int]) -> None:
-    if seed is None or not TORCH_AVAILABLE or not NUMPY_AVAILABLE:
-        return
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-
-
-def parse_label_from_filename(path: Path) -> str:
-    base = path.stem
-    return base.split("_")[0]
-
-
-class TransformerOCRDataset(Dataset):
-    def __init__(
-        self,
-        root: Union[str, Path],
-        img_h: int,
-        img_w: int,
-        requirements_override: Optional[Union[str, Path]] = None,
-    ):
-        missing = _missing_dependencies()
-        if missing:
-            raise RuntimeError(_format_dependency_error(missing, requirements_override))
-        self.root = Path(root)
-        if not self.root.exists():
-            raise FileNotFoundError(f"Dataset directory not found: {self.root}")
-        self.img_h = img_h
-        self.img_w = img_w
-        self.samples: List[Tuple[Path, str]] = []
-        for path in sorted(self.root.iterdir()):
-            if path.suffix.lower() in SUPPORTED_EXTENSIONS:
-                label = parse_label_from_filename(path)
-                if label:
-                    self.samples.append((path, label))
-        if not self.samples:
-            raise RuntimeError(f"No supported images found in {self.root}")
-
-    def __len__(self) -> int:
-        return len(self.samples)
-
-    def _load_image(self, path: Path) -> Image.Image:
-        if not PIL_AVAILABLE:
-            raise RuntimeError(_format_dependency_error(["Pillow"]))
-        return Image.open(path).convert("L")
-
-    def _resize_pad(self, img: Image.Image) -> Image.Image:
-        w, h = img.size
-        scale = self.img_h / float(h)
-        new_w = max(1, int(w * scale))
-        img = img.resize((new_w, self.img_h), Image.BILINEAR)
-        if new_w > self.img_w:
-            img = img.crop((0, 0, self.img_w, self.img_h))
-            new_w = self.img_w
-        canvas = Image.new("L", (self.img_w, self.img_h), color=255)
-        canvas.paste(img, (0, 0))
-        return canvas
-
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, str, Path]:
-        path, label = self.samples[idx]
-        img = self._load_image(path)
-        img = self._resize_pad(img)
-        tensor = torch.from_numpy(np.array(img)).float().unsqueeze(0) / 255.0  # type: ignore[arg-type]
-        return tensor, label, path
-
-
-def collate_batch(batch: List[Tuple[torch.Tensor, str, Path]]) -> Tuple[torch.Tensor, List[str], List[Path]]:
-    images, labels, paths = zip(*batch)
-    stacked = torch.stack(images, dim=0)
-    return stacked, list(labels), list(paths)
-
-
-def build_charset_from_dataset(dataset: TransformerOCRDataset) -> Charset:
-    chars: List[str] = []
-    for _, label in dataset.samples:
-        chars.extend(label)
-    if not chars:
-        raise RuntimeError("Unable to build charset from dataset labels")
-    return Charset.from_characters(chars)
-
-
-def resolve_device(requested: Optional[str]) -> torch.device:
-    if not TORCH_AVAILABLE:
-        raise RuntimeError("PyTorch is required for transformer handlers. Please install torch and torchvision.")
-    if requested and requested not in {"auto", ""}:
-        return torch.device(requested)
-    if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
-        return torch.device("mps")
-    if torch.cuda.is_available():  # pragma: no cover - depends on environment
-        return torch.device("cuda")
-    return torch.device("cpu")
-
-
-def labels_to_targets(labels: Sequence[str], charset: Charset) -> Tuple[torch.Tensor, torch.Tensor]:
-    targets = [charset.encode(label) for label in labels]
-    lengths = torch.tensor([len(seq) for seq in targets], dtype=torch.long)
-    if lengths.sum().item() == 0:
-        targets = [[1] for _ in targets]
-        lengths = torch.ones(len(targets), dtype=torch.long)
-    flat = torch.tensor([idx for seq in targets for idx in seq], dtype=torch.long)
-    return flat, lengths
 
 
 def train_one_epoch(
@@ -578,7 +346,7 @@ class TransformerTrainHandler(TransformerDependencyMixin, BaseTrainHandler):
         device = resolve_device(config.device if config.device != "auto" else self.device_name)
 
         try:
-            dataset = TransformerOCRDataset(
+            dataset = OCRDataset(
                 input_dir,
                 self.img_h,
                 self.img_w,
@@ -789,7 +557,7 @@ class TransformerEvaluateHandler(TransformerDependencyMixin, BaseEvaluateHandler
         img_w = int(checkpoint.get("img_w", TransformerPreprocessHandler.DEFAULT_IMG_WIDTH))
 
         try:
-            dataset = TransformerOCRDataset(
+            dataset = OCRDataset(
                 test_data_path,
                 img_h,
                 img_w,

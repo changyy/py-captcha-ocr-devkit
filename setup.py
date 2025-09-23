@@ -108,7 +108,13 @@ setup(
     packages=find_packages(where="src"),
     package_data={
         "captcha_ocr_devkit.api": ["demo_index.html"],
-        "captcha_ocr_devkit.examples.handlers": ["transformer_handler-requirements.txt"],
+        "captcha_ocr_devkit.examples.handlers": [
+            "*-requirements.txt",
+            "*-requirements-*.txt",
+            "*-README.md",
+            "*-config.json",
+        ],
+        "captcha_ocr_devkit.examples.scripts": ["*.sh"],
     },
     classifiers=[
         "Development Status :: 4 - Beta",

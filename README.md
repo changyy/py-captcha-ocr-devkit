@@ -49,7 +49,13 @@ captcha-ocr-devkit --help
 
 ```bash
 sw_vers
+ProductName:		macOS
+ProductVersion:		26.0
+BuildVersion:		25A354
+
 python3 -V
+Python 3.12.10
+
 python3 -m venv venv
 source venv/bin/activate
 pip install captcha-ocr-devkit

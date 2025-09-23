@@ -4,8 +4,13 @@ CLI 命令單元測試
 import json
 import subprocess
 from pathlib import Path
+from typing import Any, Dict
 
 import pytest
+from click.testing import CliRunner
+
+from captcha_ocr_devkit.cli.main import cli
+from captcha_ocr_devkit.core.handlers.base import HandlerResult
 
 
 class TestCLIBasic:
@@ -124,6 +129,7 @@ class TestCLITrain:
         assert "--input" in result.stdout
         assert "--output" in result.stdout
         assert "--handler" in result.stdout
+        assert "--handler-config" in result.stdout
 
     def test_train_command_missing_args(self, cli_path: Path):
         """測試 train 命令缺少參數"""
@@ -163,6 +169,42 @@ class TestCLITrain:
         assert model_data["training_config"]["epochs"] == 1
         assert model_data["training_config"]["validation_split"] == 0.2
 
+    def test_train_handler_config_option(self, monkeypatch, temp_dir: Path):
+        config_file = temp_dir / "demo_config.json"
+        config_file.write_text('{"lr": 0.123}', encoding='utf-8')
+
+        captured: Dict[str, Dict[str, Any]] = {}
+
+        def fake_create_pipeline_from_handlers(*, handler_configs=None, **kwargs):
+            captured['handler_configs'] = handler_configs or {}
+
+            class DummyPipeline:
+                def train_model(self, config):
+                    return HandlerResult(success=True, metadata={})
+
+            return DummyPipeline()
+
+        def fake_auto_discover(handler_type, handler_name, interactive=False):
+            return handler_name or f'demo_{handler_type}'
+
+        monkeypatch.setattr('captcha_ocr_devkit.core.pipeline.create_pipeline_from_handlers', fake_create_pipeline_from_handlers)
+        monkeypatch.setattr('captcha_ocr_devkit.core.handlers.registry.auto_discover_and_select', fake_auto_discover)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                'train',
+                '--input', str(temp_dir),
+                '--output', str(temp_dir / 'model.json'),
+                '--handler', 'demo_train',
+                '--handler-config', f'demo_train={config_file}'
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert captured['handler_configs'] == {'demo_train': {'lr': 0.123}}
+
 
 class TestCLIEvaluate:
     """CLI evaluate 命令測試"""
@@ -179,6 +221,7 @@ class TestCLIEvaluate:
         assert "評估 CAPTCHA OCR 模型" in result.stdout
         assert "--target" in result.stdout
         assert "--model" in result.stdout
+        assert "--handler-config" in result.stdout
 
     def test_evaluate_command_missing_args(self, cli_path: Path):
         """測試 evaluate 命令缺少參數"""
@@ -219,6 +262,7 @@ class TestCLIAPI:
         assert "--model" in result.stdout
         assert "--port" in result.stdout
         assert "--handler" in result.stdout
+        assert "--handler-config" in result.stdout
 
     def test_api_command_missing_model(self, cli_path: Path):
         """測試 api 命令缺少模型"""

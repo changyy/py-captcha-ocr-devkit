@@ -4,6 +4,7 @@
 """
 
 import click
+import json
 import logging
 import os
 import re
@@ -11,7 +12,7 @@ import shutil
 import sys
 import uvicorn
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Set
 
 from captcha_ocr_devkit import __version__ as CORE_VERSION
 
@@ -53,7 +54,9 @@ def cli():
 @click.option('--validation-split', default=0.2, help='驗證集比例')
 @click.option('--device', default='auto', help='設備 (cpu/cuda/mps/auto)')
 @click.option('--seed', type=int, help='隨機種子')
-def train(input, output, handler, epochs, batch_size, learning_rate, validation_split, device, seed):
+@click.option('--handler-config', '-c', multiple=True,
+              help='指定 handler 設定檔 (格式: handler_id=path.json)，可重複指定')
+def train(input, output, handler, epochs, batch_size, learning_rate, validation_split, device, seed, handler_config):
     """
     訓練 CAPTCHA OCR 模型
 
@@ -74,8 +77,14 @@ def train(input, output, handler, epochs, batch_size, learning_rate, validation_
             logger.error("無法找到或選擇 train handler")
             sys.exit(1)
 
+        # 讀取 handler 設定
+        handler_config_map = _parse_handler_configs(handler_config)
+
         # 創建 pipeline
-        pipeline = create_pipeline_from_handlers(train_handler=selected_handler)
+        pipeline = create_pipeline_from_handlers(
+            train_handler=selected_handler,
+            handler_configs=handler_config_map,
+        )
 
         # 準備訓練配置
         training_config = TrainingConfig(
@@ -119,7 +128,9 @@ def train(input, output, handler, epochs, batch_size, learning_rate, validation_
 @click.option('--model', '-m', required=True, type=click.Path(exists=True),
               help='模型檔案路徑')
 @click.option('--handler', help='指定 evaluate handler 名稱')
-def evaluate(target, model, handler):
+@click.option('--handler-config', '-c', multiple=True,
+              help='指定 handler 設定檔 (格式: handler_id=path.json)，可重複指定')
+def evaluate(target, model, handler, handler_config):
     """
     評估 CAPTCHA OCR 模型
 
@@ -139,8 +150,14 @@ def evaluate(target, model, handler):
             logger.error("無法找到或選擇 evaluate handler")
             sys.exit(1)
 
+        # 讀取 handler 設定
+        handler_config_map = _parse_handler_configs(handler_config)
+
         # 創建 pipeline
-        pipeline = create_pipeline_from_handlers(evaluate_handler=selected_handler)
+        pipeline = create_pipeline_from_handlers(
+            evaluate_handler=selected_handler,
+            handler_configs=handler_config_map,
+        )
 
         logger.info(f"📂 測試資料: {target}")
         logger.info(f"🤖 模型檔案: {model}")
@@ -185,7 +202,9 @@ def evaluate(target, model, handler):
 @click.option('--preprocess-handler', help='指定 preprocess handler 名稱')
 @click.option('--workers', default=1, help='工作進程數')
 @click.option('--reload', is_flag=True, help='自動重載')
-def api(model, host, port, handler, preprocess_handler, workers, reload):
+@click.option('--handler-config', '-c', multiple=True,
+              help='指定 handler 設定檔 (格式: handler_id=path.json)，可重複指定')
+def api(model, host, port, handler, preprocess_handler, workers, reload, handler_config):
     """
     啟動 CAPTCHA OCR API 服務
 
@@ -223,6 +242,11 @@ def api(model, host, port, handler, preprocess_handler, workers, reload):
             logger.error("無法找到指定的 preprocess handler")
             sys.exit(1)
 
+        handler_config_map = _parse_handler_configs(handler_config)
+
+        if handler_config_map:
+            os.environ['CAPTCHA_HANDLER_CONFIGS'] = json.dumps(handler_config_map)
+
         logger.info(f"🤖 模型檔案: {model}")
         logger.info(f"🌍 服務地址: http://{host}:{port}")
         logger.info(f"🔧 OCR handler: {selected_ocr_handler}")
@@ -259,7 +283,10 @@ def api(model, host, port, handler, preprocess_handler, workers, reload):
 @click.option('--force', is_flag=True, help='強制覆蓋現有檔案')
 @click.option('--handler-dir', '-d', multiple=True, type=click.Path(),
               help='額外複製 handler 的來源目錄，可重複指定')
-def init(output_dir, force, handler_dir):
+@click.option('--scripts-dir', default='./scripts', type=click.Path(),
+              help='複製範例腳本的輸出目錄')
+@click.option('--no-scripts', is_flag=True, help='不複製範例腳本')
+def init(output_dir, force, handler_dir, scripts_dir, no_scripts):
     """
     初始化專案，複製範例 handlers
 
@@ -269,6 +296,7 @@ def init(output_dir, force, handler_dir):
     """
     try:
         logger.info("🛠️  初始化專案")
+        logger.info(f"📦 captcha-ocr-devkit 版本: {CORE_VERSION}")
 
         output_path = Path(output_dir)
 
@@ -287,23 +315,36 @@ def init(output_dir, force, handler_dir):
 
         package_dir = Path(__file__).parent.parent
         examples_dir = package_dir / 'examples' / 'handlers'
+        scripts_examples_dir = package_dir / 'examples' / 'scripts'
         try:
             repo_root = Path(__file__).resolve().parents[4]
         except IndexError:
             repo_root = package_dir.parent
-        inclusion_patterns = ["*.py", "*-requirements*.txt", "*requirements*.txt", "*.md"]
+        handler_patterns = [
+            "*.py",
+            "*-requirements.txt",
+            "*-requirements-*.txt",
+            "*.md",
+            "*-config.json",
+        ]
+        script_patterns = ["*.sh"]
 
-        def copy_handler_assets(source_dir: Path, label: str) -> bool:
+        def copy_assets(source_dir: Path, destination: Path, patterns: List[str], label: str) -> bool:
             if not source_dir.exists():
                 logger.warning(f"⚠️  無法找到 {label} 來源: {source_dir}")
                 return False
 
+            destination.mkdir(parents=True, exist_ok=True)
             copied = False
-            for pattern in inclusion_patterns:
+            seen: Set[Path] = set()
+            for pattern in patterns:
                 for src_path in sorted(source_dir.glob(pattern)):
                     if src_path.name.startswith('__pycache__'):
                         continue
-                    dest_file = output_path / src_path.name
+                    if src_path in seen:
+                        continue
+                    seen.add(src_path)
+                    dest_file = destination / src_path.name
                     if dest_file.exists() and not force:
                         logger.info(f"⏭️  跳過 {src_path.name} (已存在)")
                         continue
@@ -313,15 +354,25 @@ def init(output_dir, force, handler_dir):
             return copied
 
         logger.info(f"📂 複製範例 handlers 到 {output_dir}")
-        files_copied = copy_handler_assets(examples_dir, "examples")
+        files_copied = copy_assets(examples_dir, output_path, handler_patterns, "examples")
 
         extra_dirs = [Path(p) for p in handler_dir if p]
         for extra in extra_dirs:
-            files_copied = copy_handler_assets(Path(extra), f"custom:{extra}") or files_copied
+            files_copied = copy_assets(Path(extra), output_path, handler_patterns, f"custom:{extra}") or files_copied
 
         if not files_copied:
             logger.info("📝 未複製到任何 handler，建立簡易骨架 basic_handler.py")
             create_basic_example_handler(output_path / 'basic_handler.py')
+
+        if not no_scripts:
+            scripts_destination = Path(scripts_dir)
+            scripts_copied = copy_assets(scripts_examples_dir, scripts_destination, script_patterns, "scripts")
+            if scripts_copied:
+                for script_file in scripts_destination.glob("*.sh"):
+                    try:
+                        script_file.chmod(0o755)
+                    except OSError:
+                        pass
 
         # 創建 README
         readme_path = output_path / 'README.md'
@@ -564,24 +615,28 @@ def _normalize_handler_filename(name: str) -> str:
     return f"{candidate}.py"
 
 
-def _generate_handler_template(class_prefix: str, types: Iterable[str]) -> str:
-    header = '''"""Custom handler scaffold generated by captcha-ocr-devkit."""
-
-from pathlib import Path
-from typing import Any, List
-
-from captcha_ocr_devkit.core.handlers.base import (
-    BasePreprocessHandler,
-    BaseTrainHandler,
-    BaseEvaluateHandler,
-    BaseOCRHandler,
-    EvaluationResult,
-    HandlerResult,
-    TrainingConfig,
-)
-
-
-'''
+def _generate_handler_template(
+    class_prefix: str,
+    handler_prefix: str,
+    types: Iterable[str],
+) -> str:
+    header = (
+        '"""Custom handler scaffold generated by captcha-ocr-devkit."""\n'
+        '\n'
+        'from pathlib import Path\n'
+        'from typing import Any, List\n'
+        '\n'
+        'from captcha_ocr_devkit.core.handlers.base import (\n'
+        '    BasePreprocessHandler,\n'
+        '    BaseTrainHandler,\n'
+        '    BaseEvaluateHandler,\n'
+        '    BaseOCRHandler,\n'
+        '    EvaluationResult,\n'
+        '    HandlerResult,\n'
+        '    TrainingConfig,\n'
+        ')\n'
+        '\n\n'
+    )
 
     blocks: List[str] = []
 
@@ -591,22 +646,24 @@ from captcha_ocr_devkit.core.handlers.base import (
 
     DESCRIPTION = "Describe what this preprocess handler does."
     SHORT_DESCRIPTION = "Short preprocess summary."
+    HANDLER_ID = "{handler_prefix}_preprocess"
+    VERSION = "0.1.0"
 
     def get_supported_formats(self) -> List[str]:
         return [".png", ".jpg", ".jpeg"]
 
     def process(self, image_data: Any) -> HandlerResult:
         # TODO: 依需求實作預處理邏輯
-        return HandlerResult(success=True, data=image_data, metadata={"processed": False})
+        return HandlerResult(success=True, data=image_data, metadata={{"processed": False}})
 
     def get_info(self) -> dict:
-        return {
+        return {{
             "name": self.name,
             "version": "0.1.0",
             "description": self.get_description(),
             "short_description": self.get_short_description(),
             "dependencies": self.get_dependencies(),
-        }
+        }}
 
 
 ''')
@@ -617,10 +674,12 @@ from captcha_ocr_devkit.core.handlers.base import (
 
     DESCRIPTION = "Describe training strategy and data requirements."
     SHORT_DESCRIPTION = "Short training summary."
+    HANDLER_ID = "{handler_prefix}_train"
+    VERSION = "0.1.0"
 
     def train(self, config: TrainingConfig) -> HandlerResult:
         # TODO: 實作訓練流程
-        return HandlerResult(success=True, data={"model_path": str(config.output_path)})
+        return HandlerResult(success=True, data={{"model_path": str(config.output_path)}})
 
     def save_model(self, model_data: Any, output_path: Path) -> bool:
         # TODO: 儲存模型檔案
@@ -631,13 +690,13 @@ from captcha_ocr_devkit.core.handlers.base import (
         return None
 
     def get_info(self) -> dict:
-        return {
+        return {{
             "name": self.name,
             "version": "0.1.0",
             "description": self.get_description(),
             "short_description": self.get_short_description(),
             "dependencies": self.get_dependencies(),
-        }
+        }}
 
 
 ''')
@@ -648,6 +707,8 @@ from captcha_ocr_devkit.core.handlers.base import (
 
     DESCRIPTION = "Describe evaluation metrics and datasets."
     SHORT_DESCRIPTION = "Short evaluation summary."
+    HANDLER_ID = "{handler_prefix}_evaluate"
+    VERSION = "0.1.0"
 
     def evaluate(self, model_path: Path, test_data_path: Path) -> HandlerResult:
         # TODO: 實作評估邏輯
@@ -672,13 +733,13 @@ from captcha_ocr_devkit.core.handlers.base import (
         )
 
     def get_info(self) -> dict:
-        return {
+        return {{
             "name": self.name,
             "version": "0.1.0",
             "description": self.get_description(),
             "short_description": self.get_short_description(),
             "dependencies": self.get_dependencies(),
-        }
+        }}
 
 
 ''')
@@ -689,6 +750,8 @@ from captcha_ocr_devkit.core.handlers.base import (
 
     DESCRIPTION = "Describe inference flow and model usage."
     SHORT_DESCRIPTION = "Short inference summary."
+    HANDLER_ID = "{handler_prefix}_ocr"
+    VERSION = "0.1.0"
 
     def load_model(self, model_path: Path) -> bool:
         # TODO: 實作模型載入
@@ -696,16 +759,16 @@ from captcha_ocr_devkit.core.handlers.base import (
 
     def predict(self, processed_image: Any) -> HandlerResult:
         # TODO: 實作推論流程
-        return HandlerResult(success=True, data="TODO", metadata={"confidence": 0.0})
+        return HandlerResult(success=True, data="TODO", metadata={{"confidence": 0.0}})
 
     def get_info(self) -> dict:
-        return {
+        return {{
             "name": self.name,
             "version": "0.1.0",
             "description": self.get_description(),
             "short_description": self.get_short_description(),
             "dependencies": self.get_dependencies(),
-        }
+        }}
 
 
 ''')
@@ -713,12 +776,263 @@ from captcha_ocr_devkit.core.handlers.base import (
     return header + ''.join(blocks)
 
 
+def _posix_relpath(target: Path, start: Path) -> str:
+    return Path(os.path.relpath(target, start)).as_posix()
+
+
+def _write_script(path: Path, content: str, force: bool) -> bool:
+    if path.exists() and not force:
+        logger.info(f"⏭️  跳過腳本 {path} (已存在)")
+        return False
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding='utf-8')
+    try:
+        path.chmod(0o755)
+    except OSError:
+        pass
+    logger.info(f"✅ 已建立腳本: {path}")
+    return True
+
+
+def _parse_handler_configs(entries: Iterable[str]) -> Dict[str, Dict[str, Any]]:
+    config_map: Dict[str, Dict[str, Any]] = {}
+    for entry in entries:
+        if '=' not in entry:
+            raise click.BadParameter("格式需為 handler_id=path.json", param='handler_config')
+
+        handler_id, path_str = entry.split('=', 1)
+        handler_id = handler_id.strip()
+        path_str = path_str.strip()
+
+        if not handler_id:
+            raise click.BadParameter("handler_id 不可為空", param='handler_config')
+
+        config_path = Path(path_str).expanduser()
+        if not config_path.is_file():
+            raise click.BadParameter(f"找不到設定檔: {config_path}", param='handler_config')
+
+        try:
+            data = json.loads(config_path.read_text(encoding='utf-8'))
+        except json.JSONDecodeError as exc:
+            raise click.BadParameter(f"解析 JSON 失敗 ({config_path}): {exc}", param='handler_config') from exc
+
+        if not isinstance(data, dict):
+            raise click.BadParameter(f"設定檔需為 JSON 物件: {config_path}", param='handler_config')
+
+        config_map[handler_id] = data
+
+    return config_map
+
+
+def _build_train_script(
+    handler_ids: Dict[str, str],
+    config_rel_path: str,
+    model_rel_path: str,
+    rel_to_root_from_scripts: str,
+) -> str:
+    train_id = handler_ids['train']
+    return (
+        f"#!/bin/bash\n"
+        "set -euo pipefail\n\n"
+        "SCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\n"
+        f"PROJECT_ROOT=\"$(cd \"${{SCRIPT_DIR}}/{rel_to_root_from_scripts}\" && pwd)\"\n"
+        "cd \"${PROJECT_ROOT}\"\n\n"
+        f"CONFIG=\"{config_rel_path}\"\n"
+        f"MODEL_PATH=\"{model_rel_path}\"\n\n"
+        "mkdir -p \"$(dirname \"${MODEL_PATH}\")\"\n\n"
+        "CONFIG_ARGS=()\n"
+        "if [ -f \"${CONFIG}\" ]; then\n"
+        "  while IFS= read -r token; do\n"
+        "    CONFIG_ARGS+=(\"$token\")\n"
+        "  done < <(python3 - <<'PY' \"${CONFIG}\"\n"
+        "import json, sys\n"
+        "from pathlib import Path\n\n"
+        "path = Path(sys.argv[1])\n"
+        "try:\n"
+        "    data = json.loads(path.read_text())\n"
+        "except Exception:\n"
+        "    sys.exit(0)\n\n"
+        "mapping = [\n"
+        "    ('epochs', '--epochs'),\n"
+        "    ('batch_size', '--batch-size'),\n"
+        "    ('learning_rate', '--learning-rate'),\n"
+        "    ('validation_split', '--validation-split'),\n"
+        "    ('device', '--device'),\n"
+        "    ('seed', '--seed'),\n"
+        "]\n"
+        "for key, flag in mapping:\n"
+        "    if key in data:\n"
+        "        print(flag)\n"
+        "        print(str(data[key]))\n"
+        "PY\n"
+        "  )\n"
+        "fi\n\n"
+        f"# Example:\n# captcha-ocr-devkit train --input ./data --output {model_rel_path} --handler {train_id} --handler-config {train_id}={config_rel_path} --epochs 200 --batch-size 64 --learning-rate 0.001\n\n"
+        "CMD_ARGS=(\n"
+        "  \"--input\" \"./data\"\n"
+        "  \"--output\" \"${MODEL_PATH}\"\n"
+        f"  \"--handler\" \"{train_id}\"\n"
+        f"  \"--handler-config\" \"{train_id}=${{CONFIG}}\"\n"
+        ")\n"
+        "CMD_ARGS+=(\"${CONFIG_ARGS[@]}\")\n"
+        "CMD_ARGS+=(\"$@\")\n\n"
+        "time captcha-ocr-devkit train \"${CMD_ARGS[@]}\"\n"
+    )
+
+
+def _build_evaluate_script(
+    handler_ids: Dict[str, str],
+    config_rel_path: str,
+    model_rel_path: str,
+    rel_to_root_from_scripts: str,
+) -> str:
+    evaluate_id = handler_ids['evaluate']
+    return (
+        f"#!/bin/bash\n"
+        "set -euo pipefail\n\n"
+        "SCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\n"
+        f"PROJECT_ROOT=\"$(cd \"${{SCRIPT_DIR}}/{rel_to_root_from_scripts}\" && pwd)\"\n"
+        "cd \"${PROJECT_ROOT}\"\n\n"
+        f"CONFIG=\"{config_rel_path}\"\n"
+        f"MODEL_PATH=\"{model_rel_path}\"\n\n"
+        f"# Example:\n# captcha-ocr-devkit evaluate --target ./data --model {model_rel_path} --handler {evaluate_id} --handler-config {evaluate_id}={config_rel_path}\n\n"
+        "CMD_ARGS=(\n"
+        "  \"--target\" \"./data\"\n"
+        "  \"--model\" \"${MODEL_PATH}\"\n"
+        f"  \"--handler\" \"{evaluate_id}\"\n"
+        f"  \"--handler-config\" \"{evaluate_id}=${{CONFIG}}\"\n"
+        ")\n"
+        "CMD_ARGS+=(\"$@\")\n\n"
+        "time captcha-ocr-devkit evaluate \"${CMD_ARGS[@]}\"\n"
+    )
+
+
+def _build_api_script(
+    handler_ids: Dict[str, str],
+    config_rel_path: str,
+    model_rel_path: str,
+    rel_to_root_from_scripts: str,
+    include_preprocess: bool,
+) -> str:
+    ocr_id = handler_ids['ocr']
+    preprocess_id = handler_ids.get('preprocess') if include_preprocess else None
+
+    return (
+        f"#!/bin/bash\n"
+        "set -euo pipefail\n\n"
+        "SCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\n"
+        f"PROJECT_ROOT=\"$(cd \"${{SCRIPT_DIR}}/{rel_to_root_from_scripts}\" && pwd)\"\n"
+        "cd \"${PROJECT_ROOT}\"\n\n"
+        f"CONFIG=\"{config_rel_path}\"\n"
+        f"MODEL_PATH=\"{model_rel_path}\"\n\n"
+        "CLI_ARGS=()\n"
+        "if [ -f \"${CONFIG}\" ]; then\n"
+        "  while IFS= read -r token; do\n"
+        "    CLI_ARGS+=(\"$token\")\n"
+        "  done < <(python3 - <<'PY' \"${CONFIG}\"\n"
+        "import json, sys\n"
+        "from pathlib import Path\n\n"
+        "path = Path(sys.argv[1])\n"
+        "try:\n"
+        "    data = json.loads(path.read_text())\n"
+        "except Exception:\n"
+        "    sys.exit(0)\n\n"
+        "mapping = [\n"
+        "    ('host', '--host'),\n"
+        "    ('port', '--port'),\n"
+        "    ('workers', '--workers'),\n"
+        "]\n"
+        "for key, flag in mapping:\n"
+        "    if key in data:\n"
+        "        print(flag)\n"
+        "        print(str(data[key]))\n"
+        "reload_value = data.get('reload')\n"
+        "if isinstance(reload_value, bool) and reload_value:\n"
+        "    print('--reload')\n"
+        "PY\n"
+        "  )\n"
+        "fi\n\n"
+        f"# Example:\n# captcha-ocr-devkit api --handler {ocr_id} --model {model_rel_path} --handler-config {ocr_id}={config_rel_path}\n\n"
+        "CMD_ARGS=(\n"
+        f"  \"--handler\" \"{ocr_id}\"\n"
+        f"  \"--handler-config\" \"{ocr_id}=${{CONFIG}}\"\n"
+        "  \"--model\" \"${MODEL_PATH}\"\n"
+        ")\n"
+        + (
+            "CMD_ARGS+=(\"--preprocess-handler\" \"{0}\" \"--handler-config\" \"{0}=${{CONFIG}}\")\n".format(preprocess_id)
+            if preprocess_id else ""
+        )
+        + "CMD_ARGS+=(\"${CLI_ARGS[@]}\")\n"
+        "CMD_ARGS+=(\"$@\")\n\n"
+        "captcha-ocr-devkit api \"${CMD_ARGS[@]}\"\n"
+    )
+
+
+def _generate_handler_readme(
+    handler_name: str,
+    class_prefix: str,
+    handler_prefix: str,
+    selected_types: Set[str],
+    config_rel_path: str,
+    script_paths: List[str],
+) -> str:
+    type_map = {
+        'preprocess': '⚙️ Preprocess: 負責圖片載入、尺寸調整、資料增強與張量化。',
+        'train': '🎯 Train: 負責資料切分、模型訓練流程與 checkpoint 管理。',
+        'evaluate': '📊 Evaluate: 負責載入模型、跑測試資料並彙整精準率/字元率等指標。',
+        'ocr': '🔍 OCR: 負責載入模型、處理輸入並回傳推論結果與額外中繼資料。',
+    }
+    bullet_lines = [type_map[t] for t in sorted(selected_types) if t in type_map]
+    if not bullet_lines:
+        bullet_lines = ['(尚未指定 handler 類型，請更新 README 說明)']
+    bullet_section = '\n'.join(f'- {line}' for line in bullet_lines)
+
+    scripts_section = '\n'.join(f'- `{path}`' for path in script_paths) if script_paths else '尚未產生腳本。使用 create-handler 時啟用腳本生成功能即可自動建立。'
+
+    handler_ids = {
+        'preprocess': f"{handler_prefix}_preprocess",
+        'train': f"{handler_prefix}_train",
+        'evaluate': f"{handler_prefix}_evaluate",
+        'ocr': f"{handler_prefix}_ocr",
+    }
+    available_ids = [handler_ids[t] for t in sorted(selected_types) if t in handler_ids]
+    available_ids_text = ', '.join(f'`{hid}`' for hid in available_ids) if available_ids else 'N/A'
+    return (
+        f"# {handler_name} Handler Blueprint\n\n"
+        f"這份 README 說明 `{class_prefix}` handler 骨架的結構與擴充方式。\n\n"
+        "## 架構重點\n\n"
+        "- Handler 介面源自 `captcha_ocr_devkit.core.handlers.base`，可與 CLI 指令整合。\n"
+        "- 預設實作會回傳成功的 `HandlerResult`，請依需求補上真實邏輯。\n"
+        "- 依照資料流分層，方便將預處理 / 訓練 / 評估 / 推論分工。\n\n"
+        "## 產生的元件\n\n"
+        f"{bullet_section}\n\n"
+        "## Handler 設定檔\n\n"
+        f"- `{config_rel_path}`：預設為空 JSON，可依照 handler 需求填入參數。\n\n"
+        "## 常用腳本\n\n"
+        f"{scripts_section}\n\n"
+        "## 下一步\n\n"
+        "1. 依實際需求補齊模型載入、資料處理與錯誤處理。\n"
+        "2. 若有額外相依套件，請同步編輯 `requirements.txt` 或專屬 `*-requirements.txt`。\n"
+        f"3. 在 CLI 上使用 {available_ids_text} 搭配 `--handler-config <handler_id>={config_rel_path}` 測試流程，並確保 `get_info()` 內容完整。\n"
+    )
+
+
 @cli.command('create-handler')
 @click.argument('handler_name')
 @click.option('--output-dir', '-o', default='./handlers', type=click.Path(), help='輸出目錄')
 @click.option('--types', '-t', default='preprocess,train,evaluate,ocr', help='指定要產生的 handler 類型 (以逗號分隔)。')
 @click.option('--force', is_flag=True, help='允許覆蓋已存在檔案')
-def create_handler(handler_name: str, output_dir: str, types: str, force: bool) -> None:
+@click.option('--scripts-dir', default='./scripts', type=click.Path(), help='產生腳本的輸出目錄')
+@click.option('--no-scripts', is_flag=True, help='不自動產生 helper 腳本')
+def create_handler(
+    handler_name: str,
+    output_dir: str,
+    types: str,
+    force: bool,
+    scripts_dir: str,
+    no_scripts: bool,
+) -> None:
     """建立新的 handler 骨架檔案。"""
     try:
         output_path = Path(output_dir)
@@ -746,8 +1060,84 @@ def create_handler(handler_name: str, output_dir: str, types: str, force: bool) 
             logger.error("❌ handler_name 無法轉換為有效類別名稱")
             sys.exit(1)
 
-        content = _generate_handler_template(class_prefix, selected_types)
+        module_stem = target_file.stem
+        handler_prefix = module_stem[:-8] if module_stem.endswith('_handler') else module_stem
+
+        content = _generate_handler_template(class_prefix, handler_prefix, selected_types)
         target_file.write_text(content, encoding='utf-8')
+
+        config_path = target_file.with_name(f"{target_file.stem}-config.json")
+        if config_path.exists() and not force:
+            logger.info(f"⏭️  跳過設定檔 {config_path.name} (已存在)")
+        else:
+            config_path.write_text("{}\n", encoding='utf-8')
+            logger.info(f"✅ 已建立設定檔: {config_path}")
+
+        project_root = Path.cwd().resolve()
+        config_rel_path = _posix_relpath(config_path.resolve(), project_root)
+
+        script_paths: List[str] = []
+        if not no_scripts:
+            scripts_dir_path = Path(scripts_dir)
+            scripts_dir_path.mkdir(parents=True, exist_ok=True)
+            scripts_dir_resolved = scripts_dir_path.resolve()
+            rel_to_root = _posix_relpath(project_root, scripts_dir_resolved)
+
+            handler_ids = {
+                'preprocess': f"{handler_prefix}_preprocess",
+                'train': f"{handler_prefix}_train",
+                'evaluate': f"{handler_prefix}_evaluate",
+                'ocr': f"{handler_prefix}_ocr",
+            }
+
+            model_rel_path = f"model/model.{handler_prefix}"
+
+            if 'train' in selected_types:
+                script_path = scripts_dir_path / f"train_{handler_prefix}.sh"
+                script_content = _build_train_script(
+                    handler_ids,
+                    config_rel_path,
+                    model_rel_path,
+                    rel_to_root,
+                )
+                if _write_script(script_path, script_content, force) or script_path.exists():
+                    script_paths.append(_posix_relpath(script_path.resolve(), project_root))
+            if 'evaluate' in selected_types:
+                script_path = scripts_dir_path / f"evaluate_{handler_prefix}.sh"
+                script_content = _build_evaluate_script(
+                    handler_ids,
+                    config_rel_path,
+                    model_rel_path,
+                    rel_to_root,
+                )
+                if _write_script(script_path, script_content, force) or script_path.exists():
+                    script_paths.append(_posix_relpath(script_path.resolve(), project_root))
+            if 'ocr' in selected_types:
+                script_path = scripts_dir_path / f"api_{handler_prefix}.sh"
+                script_content = _build_api_script(
+                    handler_ids,
+                    config_rel_path,
+                    model_rel_path,
+                    rel_to_root,
+                    include_preprocess='preprocess' in selected_types,
+                )
+                if _write_script(script_path, script_content, force) or script_path.exists():
+                    script_paths.append(_posix_relpath(script_path.resolve(), project_root))
+
+        readme_path = target_file.with_name(f"{target_file.stem}-README.md")
+        if readme_path.exists() and not force:
+            logger.info(f"⏭️  跳過 README {readme_path.name} (已存在)")
+        else:
+            readme_content = _generate_handler_readme(
+                handler_name,
+                class_prefix,
+                handler_prefix,
+                selected_types,
+                config_rel_path,
+                script_paths,
+            )
+            readme_path.write_text(readme_content, encoding='utf-8')
+            logger.info(f"✅ 已建立 README: {readme_path}")
 
         logger.info(f"✅ 已建立 handler: {target_file}")
     except Exception as exc:

@@ -4,6 +4,7 @@ FastAPI 服務器 v2.0
 """
 
 import os
+import json
 import time
 import base64
 import logging
@@ -121,10 +122,19 @@ Handler 管理器
             discovered = registry.discover_handlers()
             logger.info(f"🔍 發現的 handlers: {discovered}")
 
+            handler_configs_env = os.getenv('CAPTCHA_HANDLER_CONFIGS', '')
+            handler_configs: Dict[str, Dict[str, Any]] = {}
+            if handler_configs_env:
+                try:
+                    handler_configs = json.loads(handler_configs_env)
+                except json.JSONDecodeError as exc:
+                    logger.warning(f"⚠️  無法解析 CAPTCHA_HANDLER_CONFIGS: {exc}")
+
             # 創建 pipeline
             self.pipeline = create_pipeline_from_handlers(
                 preprocess_handler=preprocess_handler,
-                ocr_handler=ocr_handler
+                ocr_handler=ocr_handler,
+                handler_configs=handler_configs,
             )
 
             # 載入 OCR 模型
