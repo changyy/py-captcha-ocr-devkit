@@ -33,7 +33,7 @@ from captcha_ocr_devkit.examples.handlers.ocr_common import (
 )
 from captcha_ocr_devkit.examples.handlers.transformer_handler import TransformerPreprocessHandler
 
-CNN_HANDLER_VERSION = "1.20250923.1900"
+CNN_HANDLER_VERSION = "1.20251001.0000"
 CNN_DEPENDENCIES = ["torch", "torchvision", "pillow", "numpy"]
 CNN_REQUIREMENTS_FILE = "cnn_handler-requirements.txt"
 DEFAULT_NUM_CHARACTERS = 4
@@ -110,179 +110,34 @@ class CNNPreprocessHandler(CNNDependencyMixin, TransformerPreprocessHandler):
         return info
 
 
-class ResidualBlock(nn.Module):
-    """Residual block with batch normalization and dropout."""
-
-    def __init__(self, in_channels: int, out_channels: int, stride: int = 1, dropout: float = 0.1):
-        super().__init__()
-        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(out_channels)
-        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(out_channels)
-        self.dropout = nn.Dropout2d(dropout)
-
-        # Skip connection
-        self.skip = nn.Sequential()
-        if stride != 1 or in_channels != out_channels:
-            self.skip = nn.Sequential(
-                nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride, bias=False),
-                nn.BatchNorm2d(out_channels)
-            )
-
-    def forward(self, x):
-        residual = self.skip(x)
-
-        out = torch.relu(self.bn1(self.conv1(x)))
-        out = self.dropout(out)
-        out = self.bn2(self.conv2(out))
-
-        out += residual
-        return torch.relu(out)
-
-
-class AttentionModule(nn.Module):
-    """Channel and spatial attention module."""
-
-    def __init__(self, channels: int):
-        super().__init__()
-        # Channel attention
-        self.channel_attention = nn.Sequential(
-            nn.AdaptiveAvgPool2d(1),
-            nn.Conv2d(channels, channels // 8, 1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(channels // 8, channels, 1),
-            nn.Sigmoid()
-        )
-
-        # Spatial attention
-        self.spatial_attention = nn.Sequential(
-            nn.Conv2d(2, 1, kernel_size=7, padding=3),
-            nn.Sigmoid()
-        )
-
-    def forward(self, x):
-        # Channel attention
-        ca = self.channel_attention(x)
-        x = x * ca
-
-        # Spatial attention
-        avg_pool = torch.mean(x, dim=1, keepdim=True)
-        max_pool, _ = torch.max(x, dim=1, keepdim=True)
-        spatial_input = torch.cat([avg_pool, max_pool], dim=1)
-        sa = self.spatial_attention(spatial_input)
-        x = x * sa
-
-        return x
-
-
 class CNNClassifier(nn.Module):
-    """Optimized CNN with residual blocks, attention, and multi-scale features."""
+    """Compact convolutional classifier that predicts fixed-length captcha strings."""
 
-    def __init__(self, num_classes: int, num_characters: int, in_channels: int = 1, use_optimized: bool = True, dropout: float = 0.2):
+    def __init__(self, num_classes: int, num_characters: int, in_channels: int = 1):
         super().__init__()
         self.num_characters = num_characters
         self.num_classes = num_classes
-        self.use_optimized = use_optimized
-
-        if use_optimized:
-            # Optimized architecture with residual blocks and attention
-            # Initial feature extraction
-            self.stem = nn.Sequential(
-                nn.Conv2d(in_channels, 64, kernel_size=7, stride=2, padding=3, bias=False),
-                nn.BatchNorm2d(64),
-                nn.ReLU(inplace=True),
-                nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-            )
-
-            # Residual blocks with progressive channel increase
-            self.layer1 = self._make_layer(64, 64, 2, stride=1, dropout=dropout)
-            self.layer2 = self._make_layer(64, 128, 2, stride=2, dropout=dropout)
-            self.layer3 = self._make_layer(128, 256, 2, stride=2, dropout=dropout)
-            self.layer4 = self._make_layer(256, 512, 2, stride=2, dropout=dropout)
-
-            # Attention modules
-            self.attention1 = AttentionModule(128)
-            self.attention2 = AttentionModule(256)
-            self.attention3 = AttentionModule(512)
-
-            # Multi-scale feature fusion (MPS compatible)
-            self.feature_fusion = nn.Sequential(
-                nn.AdaptiveAvgPool2d((1, 1)),  # MPS compatible global pooling
-                nn.Flatten(),
-                nn.Linear(512, 1024),
-                nn.ReLU(inplace=True),
-                nn.Dropout(dropout),
-                nn.Linear(1024, 512),
-                nn.ReLU(inplace=True),
-                nn.Dropout(dropout)
-            )
-
-            # Character-specific heads
-            self.character_heads = nn.ModuleList([
-                nn.Sequential(
-                    nn.Linear(512, 256),
-                    nn.ReLU(inplace=True),
-                    nn.Dropout(dropout / 2),
-                    nn.Linear(256, num_classes)
-                ) for _ in range(num_characters)
-            ])
-        else:
-            # Basic architecture (original)
-            self.encoder = nn.Sequential(
-                nn.Conv2d(in_channels, 64, kernel_size=3, padding=1),
-                nn.BatchNorm2d(64),
-                nn.ReLU(inplace=True),
-                nn.MaxPool2d(2, 2),
-                nn.Conv2d(64, 128, kernel_size=3, padding=1),
-                nn.BatchNorm2d(128),
-                nn.ReLU(inplace=True),
-                nn.MaxPool2d(2, 2),
-                nn.Conv2d(128, 256, kernel_size=3, padding=1),
-                nn.BatchNorm2d(256),
-                nn.ReLU(inplace=True),
-                nn.AdaptiveAvgPool2d((1, 1)),
-            )
-            self.head = nn.Linear(256, num_classes * num_characters)
-
-    def _make_layer(self, in_channels: int, out_channels: int, blocks: int, stride: int = 1, dropout: float = 0.1):
-        layers = []
-        layers.append(ResidualBlock(in_channels, out_channels, stride, dropout))
-        for _ in range(1, blocks):
-            layers.append(ResidualBlock(out_channels, out_channels, 1, dropout))
-        return nn.Sequential(*layers)
+        self.encoder = nn.Sequential(
+            nn.Conv2d(in_channels, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2, 2),
+            nn.Conv2d(64, 128, kernel_size=3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2, 2),
+            nn.Conv2d(128, 256, kernel_size=3, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+            nn.AdaptiveAvgPool2d((1, 1)),
+        )
+        self.head = nn.Linear(256, num_classes * num_characters)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.use_optimized:
-            # Optimized forward pass
-            x = self.stem(x)
-            x = self.layer1(x)
-
-            x = self.layer2(x)
-            x = self.attention1(x)
-
-            x = self.layer3(x)
-            x = self.attention2(x)
-
-            x = self.layer4(x)
-            x = self.attention3(x)
-
-            # Feature fusion
-            features = self.feature_fusion(x)
-
-            # Character-specific predictions
-            char_outputs = []
-            for head in self.character_heads:
-                char_outputs.append(head(features))
-
-            # Stack character predictions
-            char_logits = torch.stack(char_outputs, dim=1)  # [batch, num_chars, num_classes]
-            return char_logits
-        else:
-            # Basic forward pass
-            features = self.encoder(x)
-            features = features.view(features.size(0), -1)
-            logits = self.head(features)
-            return logits.view(x.size(0), self.num_characters, self.num_classes)
+        features = self.encoder(x)
+        features = features.view(features.size(0), -1)
+        logits = self.head(features)
+        return logits.view(x.size(0), self.num_characters, self.num_classes)
 
 
 def _labels_to_tensor(labels: Sequence[str], alphabet_map: Dict[str, int], num_characters: int) -> torch.Tensor:
@@ -335,13 +190,6 @@ class CNNTrainHandler(CNNDependencyMixin, BaseTrainHandler):
         self.alphabet = _normalize_alphabet(cfg.get("alphabet", DEFAULT_ALPHABET))
         self.num_characters = int(cfg.get("num_characters", DEFAULT_NUM_CHARACTERS))
         self.alphabet_map = {ch: idx for idx, ch in enumerate(self.alphabet)}
-
-        # Optimized architecture settings
-        self.use_optimized = cfg.get("use_optimized", True)
-        self.dropout = float(cfg.get("dropout", 0.2))
-        self.label_smoothing = float(cfg.get("label_smoothing", 0.1))
-        self.cosine_annealing = cfg.get("cosine_annealing", True)
-        self.early_stopping_patience = int(cfg.get("early_stopping_patience", 10))
 
     def train(self, config: TrainingConfig) -> HandlerResult:
         missing = _missing_dependencies()
@@ -414,26 +262,14 @@ class CNNTrainHandler(CNNDependencyMixin, BaseTrainHandler):
                 collate_fn=collate_batch,
             )
 
-        model = CNNClassifier(
-            num_classes=len(self.alphabet),
-            num_characters=self.num_characters,
-            use_optimized=self.use_optimized,
-            dropout=self.dropout
-        )
+        model = CNNClassifier(num_classes=len(self.alphabet), num_characters=self.num_characters)
         model.to(device)
-        criterion = nn.CrossEntropyLoss(label_smoothing=self.label_smoothing)
+        criterion = nn.CrossEntropyLoss()
         optimizer = optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=self.weight_decay)
-
-        # Learning rate scheduler
-        if self.cosine_annealing:
-            scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.epochs)
-        else:
-            scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=config.epochs//3, gamma=0.1)
 
         history: List[Dict[str, Any]] = []
         best_accuracy = -1.0
         best_char_accuracy = -1.0
-        patience_counter = 0
 
         LOGGER.info(
             "CNN training configured: version=%s epochs=%d, batches=%d, device=%s, log_interval=%d",
@@ -463,10 +299,6 @@ class CNNTrainHandler(CNNDependencyMixin, BaseTrainHandler):
                 loss = criterion(logits.view(-1, logits.size(-1)), targets.view(-1))
                 optimizer.zero_grad()
                 loss.backward()
-
-                # Gradient clipping
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-
                 optimizer.step()
 
                 batch_size = inputs.size(0)
@@ -534,15 +366,10 @@ class CNNTrainHandler(CNNDependencyMixin, BaseTrainHandler):
                 }
             )
 
-            # Learning rate scheduling
-            scheduler.step()
-
-            # Model checkpointing and early stopping
             should_save = val_loader is None or (val_accuracy is not None and val_accuracy >= best_accuracy)
             if should_save:
                 if val_accuracy is not None:
                     best_accuracy = max(best_accuracy, val_accuracy)
-                    patience_counter = 0
                 if val_char_accuracy is not None:
                     best_char_accuracy = max(best_char_accuracy, val_char_accuracy)
                 checkpoint = {
@@ -551,17 +378,10 @@ class CNNTrainHandler(CNNDependencyMixin, BaseTrainHandler):
                     "num_characters": self.num_characters,
                     "img_h": self.img_h,
                     "img_w": self.img_w,
-                    "use_optimized": self.use_optimized,
-                    "dropout": self.dropout,
                     "handler_version": CNN_HANDLER_VERSION,
                 }
                 if not self.save_model(checkpoint, config.output_path):
-                    return HandlerResult(success=False, error="Failed to save optimized CNN checkpoint")
-            else:
-                patience_counter += 1
-                if patience_counter >= self.early_stopping_patience:
-                    LOGGER.info(f"Early stopping triggered after {epoch} epochs")
-                    break
+                    return HandlerResult(success=False, error="Failed to save CNN checkpoint")
 
         metadata = {
             "device": str(device),
@@ -646,8 +466,6 @@ class CNNEvaluateHandler(CNNDependencyMixin, BaseEvaluateHandler):
         num_characters = int(checkpoint.get("num_characters", DEFAULT_NUM_CHARACTERS))
         img_h = int(checkpoint.get("img_h", DEFAULT_IMG_HEIGHT))
         img_w = int(checkpoint.get("img_w", DEFAULT_IMG_WIDTH))
-        use_optimized = checkpoint.get("use_optimized", False)  # Default to basic for old models
-        dropout = checkpoint.get("dropout", 0.2)
 
         try:
             dataset = OCRDataset(
@@ -673,12 +491,7 @@ class CNNEvaluateHandler(CNNDependencyMixin, BaseEvaluateHandler):
         )
 
         device = resolve_device(self.device_name)
-        model = CNNClassifier(
-            num_classes=len(alphabet),
-            num_characters=num_characters,
-            use_optimized=use_optimized,
-            dropout=dropout
-        )
+        model = CNNClassifier(num_classes=len(alphabet), num_characters=num_characters)
         model.load_state_dict(checkpoint["model"])
         model.to(device)
         model.eval()
@@ -790,15 +603,8 @@ class CNNOCRHandler(CNNDependencyMixin, BaseOCRHandler):
             self.num_characters = int(checkpoint.get("num_characters", self.num_characters))
             self.img_h = int(checkpoint.get("img_h", self.img_h))
             self.img_w = int(checkpoint.get("img_w", self.img_w))
-            use_optimized = checkpoint.get("use_optimized", False)
-            dropout = checkpoint.get("dropout", 0.2)
 
-            self.model = CNNClassifier(
-                num_classes=len(self.alphabet),
-                num_characters=self.num_characters,
-                use_optimized=use_optimized,
-                dropout=dropout
-            )
+            self.model = CNNClassifier(num_classes=len(self.alphabet), num_characters=self.num_characters)
             self.model.load_state_dict(checkpoint["model"])
             self.device = resolve_device(self.device_name)
             self.model.to(self.device)

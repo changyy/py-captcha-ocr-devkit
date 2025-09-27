@@ -1,7 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
-NAME="crnn"
+# 🚀 Transformer Turbo Training Script
+# Enhanced transformer with 4 layers, 8 attention heads, 384 dimensions
+# Target: 96%+ accuracy with advanced training strategies
+
+NAME="transformer_turbo"
 HANDLER="${NAME}_train"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -40,9 +44,13 @@ PY
   )
 fi
 
-# Example:
-# captcha-ocr-devkit train --input ./data --output model/model.crnn --handler crnn_train --handler-config crnn_train=handlers/crnn_handler-config.json
-# time captcha-ocr-devkit train --input ./data --handler crnn_train --output model/model.crnn --epochs 250 --batch-size 48 --learning-rate 0.0005
+echo "🚀 Starting Transformer Turbo Training..."
+echo "🏗️  Enhanced Architecture: 384d × 4L × 8H"
+echo "⚡ Advanced Features: Cosine annealing, gradient clipping, pre-layer norm"
+echo "🎯 Target: 96%+ accuracy"
+echo "💾 Model output: ${MODEL_PATH}"
+echo "⚙️ Configuration: ${CONFIG}"
+echo ""
 
 CMD_ARGS=(
   "--input" "./data"
@@ -50,7 +58,18 @@ CMD_ARGS=(
   "--handler" "${HANDLER}"
   "--handler-config" "${HANDLER}=${CONFIG}"
 )
-CMD_ARGS+=("${CONFIG_ARGS[@]}")
+
+# Safely append CONFIG_ARGS if not empty
+if [ ${#CONFIG_ARGS[@]} -gt 0 ]; then
+  CMD_ARGS+=("${CONFIG_ARGS[@]}")
+fi
+
 CMD_ARGS+=("$@")
 
-time captcha-ocr-devkit train "${CMD_ARGS[@]}"
+# Enable MPS fallback for CTC loss + timing
+PYTORCH_ENABLE_MPS_FALLBACK=1 time captcha-ocr-devkit train "${CMD_ARGS[@]}"
+
+echo ""
+echo "🎉 Transformer Turbo training completed!"
+echo "📈 Check model performance with: ./scripts/evaluate_transformer_turbo.sh"
+echo "🌐 Start API service with: ./scripts/api_transformer_turbo.sh"

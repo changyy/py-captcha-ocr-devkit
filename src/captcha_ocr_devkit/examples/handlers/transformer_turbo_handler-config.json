@@ -1,0 +1,16 @@
+{
+  "epochs": 300,
+  "batch_size": 32,
+  "learning_rate": 0.000125,
+  "validation_split": 0.2,
+  "device": "cpu",
+  "seed": 42,
+  "weight_decay": 0.01,
+  "label_smoothing": 0.1,
+  "gradient_clip_val": 1.0,
+  "warmup_steps": 1000,
+  "cosine_annealing": true,
+  "early_stopping_patience": 20,
+  "save_best_only": true,
+  "monitor": "val_accuracy"
+}

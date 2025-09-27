@@ -1,0 +1,11 @@
+{
+  "expected_length": 4,
+  "alphabet": "abcdefghijklmnopqrstuvwxyz",
+  "force_lowercase": true,
+  "seed": 42,
+  "device": "cpu",
+  "batch_size": 32,
+  "epochs": 200,
+  "learning_rate": 0.0002,
+  "validation_split": 0.2
+}

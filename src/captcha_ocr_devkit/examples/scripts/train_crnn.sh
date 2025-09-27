@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
+# Enable MPS fallback for CTC loss on Apple Silicon
+export PYTORCH_ENABLE_MPS_FALLBACK=1
+
 NAME="crnn"
 HANDLER="${NAME}_train"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -50,7 +53,12 @@ CMD_ARGS=(
   "--handler" "${HANDLER}"
   "--handler-config" "${HANDLER}=${CONFIG}"
 )
-CMD_ARGS+=("${CONFIG_ARGS[@]}")
+
+# Safely append CONFIG_ARGS if not empty
+if [ ${#CONFIG_ARGS[@]} -gt 0 ]; then
+  CMD_ARGS+=("${CONFIG_ARGS[@]}")
+fi
+
 CMD_ARGS+=("$@")
 
 time captcha-ocr-devkit train "${CMD_ARGS[@]}"

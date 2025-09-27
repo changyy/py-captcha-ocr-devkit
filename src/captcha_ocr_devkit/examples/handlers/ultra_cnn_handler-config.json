@@ -1,0 +1,20 @@
+{
+  "epochs": 200,
+  "batch_size": 32,
+  "learning_rate": 0.001,
+  "validation_split": 0.2,
+  "device": "auto",
+  "seed": 42,
+  "dropout": 0.2,
+  "weight_decay": 0.0001,
+  "label_smoothing": 0.1,
+  "cosine_annealing": true,
+  "early_stopping_patience": 15,
+  "use_augmentation": true,
+  "img_height": 64,
+  "img_width": 128,
+  "num_characters": 4,
+  "alphabet": "abcdefghijklmnopqrstuvwxyz",
+  "num_workers": 0,
+  "log_interval": 50
+}

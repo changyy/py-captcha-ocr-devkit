@@ -1,24 +1,28 @@
 #!/bin/bash
 set -euo pipefail
 
-NAME="crnn"
-HANDLER="${NAME}_evaluate"
+# 🌐 Transformer Turbo (Set Mode) API Script
+# Uses the set-based inference handler that ignores character ordering.
+
+NAME="transformer_turbo_set"
+HANDLER="${NAME}_ocr"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${PROJECT_ROOT}"
 
 CONFIG="handlers/${NAME}_handler-config.json"
 MODEL_PATH="model/model.${NAME}"
-
-# Example:
-# captcha-ocr-devkit evaluate --target ./data --model model/model.crnn --handler crnn_evaluate --handler-config crnn_evaluate=handlers/crnn_handler-config.json
+PORT="54321"
+HOST="0.0.0.0"
 
 CMD_ARGS=(
-  "--target" "./data"
-  "--model" "${MODEL_PATH}"
   "--handler" "${HANDLER}"
+  "--model" "${MODEL_PATH}"
   "--handler-config" "${HANDLER}=${CONFIG}"
+  "--port" "${PORT}"
+  "--host" "${HOST}"
 )
+
 CMD_ARGS+=("$@")
 
-time captcha-ocr-devkit evaluate "${CMD_ARGS[@]}"
+PYTORCH_ENABLE_MPS_FALLBACK=1 captcha-ocr-devkit api "${CMD_ARGS[@]}"

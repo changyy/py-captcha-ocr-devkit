@@ -8,12 +8,13 @@ import json
 import time
 import base64
 import logging
+import string
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional, Dict, Any
 from pathlib import Path
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Request
+from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 import uvicorn
@@ -30,6 +31,162 @@ from .schemas import (
 # 設定日誌
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+# 預設的 CAPTCHA 解析設定
+DEFAULT_CAPTCHA_LENGTH = int(os.getenv("CAPTCHA_DEFAULT_LENGTH", "4"))
+DEFAULT_CAPTCHA_TYPE = os.getenv("CAPTCHA_DEFAULT_TYPE", "lowercase").strip().lower()
+DEFAULT_SEGMENTATION_METHOD = os.getenv("CAPTCHA_DEFAULT_SEGMENTATION", "auto").strip().lower()
+ENFORCE_LOWERCASE = os.getenv("CAPTCHA_ENFORCE_LOWERCASE", "true").strip().lower() != "false"
+
+_CAPTCHA_TYPE_ALIASES = {
+    "lower": "lowercase",
+    "lowercase": "lowercase",
+    "letters": "alphabetic",
+    "alpha": "alphabetic",
+    "alphabet": "alphabetic",
+    "alphabetic": "alphabetic",
+    "alphanumeric": "alphanumeric",
+    "mixed": "alphanumeric",
+    "number": "numeric",
+    "numbers": "numeric",
+    "numeric": "numeric",
+    "digit": "numeric",
+    "digits": "numeric",
+}
+
+_CAPTCHA_TYPE_CHARSETS = {
+    "lowercase": string.ascii_lowercase,
+    "alphabetic": string.ascii_letters,
+    "alphanumeric": string.ascii_letters + string.digits,
+    "numeric": string.digits,
+}
+
+_ALLOWED_SEGMENTATION_METHODS = {"auto", "projection", "connected"}
+
+
+def _parse_positive_int(value: Optional[Any]) -> Optional[int]:
+    """嘗試解析正整數，若失敗則返回 None。"""
+
+    if value is None:
+        return None
+
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+    return parsed if parsed > 0 else None
+
+
+def _normalize_captcha_type(raw_type: Optional[str]) -> str:
+    """正規化來自請求的 captcha_type。"""
+
+    if not raw_type:
+        return DEFAULT_CAPTCHA_TYPE
+
+    normalized = raw_type.strip().lower()
+    return _CAPTCHA_TYPE_ALIASES.get(normalized, normalized if normalized in _CAPTCHA_TYPE_CHARSETS else DEFAULT_CAPTCHA_TYPE)
+
+
+def _normalize_segmentation_method(raw_method: Optional[str]) -> str:
+    """正規化 segmentation_method，確保落在允許範圍。"""
+
+    if not raw_method:
+        return DEFAULT_SEGMENTATION_METHOD
+
+    normalized = raw_method.strip().lower()
+    if normalized in _ALLOWED_SEGMENTATION_METHODS:
+        return normalized
+    return DEFAULT_SEGMENTATION_METHOD
+
+
+def _resolve_captcha_settings(
+    form_password: Optional[str],
+    form_captcha_type: Optional[str],
+    form_segmentation_method: Optional[str],
+    payload: Optional[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """萃取請求欲使用的 CAPTCHA 設定，若缺漏則套用預設值。"""
+
+    payload = payload or {}
+
+    length_candidates = [form_password]
+    for key in ("captcha_length", "captchaLength", "length", "password"):
+        if key in payload:
+            length_candidates.append(payload[key])
+            break
+
+    captcha_length = DEFAULT_CAPTCHA_LENGTH
+    for candidate in length_candidates:
+        parsed = _parse_positive_int(candidate)
+        if parsed is not None:
+            captcha_length = parsed
+            break
+
+    captcha_type_candidates = [form_captcha_type]
+    for key in ("captcha_type", "captchaType", "type"):
+        if isinstance(payload.get(key), str):
+            captcha_type_candidates.append(payload[key])
+            break
+
+    captcha_type = DEFAULT_CAPTCHA_TYPE
+    if not ENFORCE_LOWERCASE:
+        for candidate in captcha_type_candidates:
+            captcha_type = _normalize_captcha_type(candidate)
+            if captcha_type:
+                break
+
+    if ENFORCE_LOWERCASE:
+        captcha_type = DEFAULT_CAPTCHA_TYPE
+
+    segmentation_candidates = [form_segmentation_method]
+    for key in ("segmentation_method", "segmentationMethod", "segmentation"):
+        if isinstance(payload.get(key), str):
+            segmentation_candidates.append(payload[key])
+            break
+
+    segmentation_method = DEFAULT_SEGMENTATION_METHOD
+    for candidate in segmentation_candidates:
+        segmentation_method = _normalize_segmentation_method(candidate)
+        if segmentation_method:
+            break
+
+    charset = _CAPTCHA_TYPE_CHARSETS.get(captcha_type, _CAPTCHA_TYPE_CHARSETS[DEFAULT_CAPTCHA_TYPE])
+
+    return {
+        "captcha_length": captcha_length,
+        "captcha_type": captcha_type,
+        "captcha_charset": charset,
+        "segmentation_method": segmentation_method,
+    }
+
+
+def _enforce_prediction_constraints(prediction: Optional[str], settings: Dict[str, Any]) -> str:
+    """若預測結果不符合設定，則觸發驗證錯誤。"""
+
+    expected_length = settings.get("captcha_length", DEFAULT_CAPTCHA_LENGTH)
+    captcha_type = settings.get("captcha_type", DEFAULT_CAPTCHA_TYPE)
+    allowed_charset = settings.get("captcha_charset") or _CAPTCHA_TYPE_CHARSETS.get(DEFAULT_CAPTCHA_TYPE)
+
+    normalized = (prediction or "").strip()
+    if captcha_type == "lowercase":
+        normalized = normalized.lower()
+
+    if len(normalized) != expected_length:
+        raise HTTPException(
+            status_code=422,
+            detail=f"預測字元數為 {len(normalized)}，與預期的 {expected_length} 不符"
+        )
+
+    disallowed = [ch for ch in normalized if allowed_charset and ch not in allowed_charset]
+    if disallowed:
+        raise HTTPException(
+            status_code=422,
+            detail="預測字元包含不支援的字元: " + ",".join(sorted(set(disallowed)))
+        )
+
+    return normalized
 
 
 class APIStats:
@@ -161,7 +318,11 @@ Handler 管理器
         """檢查是否就緒"""
         return self.model_loaded and self.pipeline is not None
 
-    async def predict_image(self, image_bytes: bytes) -> Dict[str, Any]:
+    async def predict_image(
+        self,
+        image_bytes: bytes,
+        request_details: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         """使用 pipeline 進行圖片預測"""
         if not self.is_ready():
             raise HTTPException(status_code=503, detail="Handler 尚未初始化")
@@ -172,6 +333,15 @@ Handler 管理器
 
             if not result.success:
                 raise HTTPException(status_code=400, detail=f"圖片處理失敗: {result.error}")
+
+            settings = request_details or {
+                "captcha_length": DEFAULT_CAPTCHA_LENGTH,
+                "captcha_type": DEFAULT_CAPTCHA_TYPE,
+                "captcha_charset": _CAPTCHA_TYPE_CHARSETS.get(DEFAULT_CAPTCHA_TYPE),
+                "segmentation_method": DEFAULT_SEGMENTATION_METHOD,
+            }
+
+            enforced_text = _enforce_prediction_constraints(result.data, settings)
 
             # 基於 ocr_4_chars 格式的回應結構
             warnings = []
@@ -228,7 +398,7 @@ Handler 管理器
             # 構建成功回應 (參考 api_server.py 格式)
             response_data = {
                 "status": True,
-                "data": result.data,
+                "data": enforced_text,
                 "confidence": float(confidence),
                 "processing_time": float(processing_time),
                 "timestamp": timestamp,
@@ -237,7 +407,7 @@ Handler 管理器
                 "handler_versions": handler_versions,
                 "details": {
                     "character_confidences": [float(c) for c in character_confidences],
-                    "character_count": len(result.data) if result.data else 0,
+                    "character_count": len(enforced_text),
                     "image_size": image_size,
                     "handler_info": {
                         "preprocess_handler": pipeline_info.get("config", {}).get("preprocess_handler"),
@@ -248,6 +418,14 @@ Handler 管理器
                     "metadata_completeness": metadata_completeness
                 }
             }
+
+            details: Dict[str, Any] = response_data.get("details") or {}
+            if request_details:
+                for key, value in request_details.items():
+                    if value is None:
+                        continue
+                    details.setdefault(key, value)
+            response_data["details"] = details
 
             return response_data
 
@@ -403,7 +581,10 @@ def _health_like_response(manager: HandlerManager) -> OCRResponse:
 async def ocr_image(
     request: Request,
     background_tasks: BackgroundTasks,
-    file: Optional[UploadFile] = File(None)
+    file: Optional[UploadFile] = File(None),
+    password: Optional[str] = Form(None),
+    captcha_type: Optional[str] = Form(None),
+    segmentation_method: Optional[str] = Form(None)
 ):
     """
     OCR 圖片辨識端點
@@ -505,7 +686,17 @@ async def ocr_image(
                 ).model_dump()
             )
 
-        result = await manager.predict_image(image_bytes)
+        request_settings = _resolve_captcha_settings(
+            form_password=password,
+            form_captcha_type=captcha_type,
+            form_segmentation_method=segmentation_method,
+            payload=payload
+        )
+
+        result = await manager.predict_image(
+            image_bytes,
+            request_details=request_settings
+        )
 
         processing_time = time.time() - start_time
         background_tasks.add_task(record_api_call, processing_time, True)

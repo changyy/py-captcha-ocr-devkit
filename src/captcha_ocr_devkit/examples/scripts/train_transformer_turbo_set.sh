@@ -1,8 +1,14 @@
 #!/bin/bash
 set -euo pipefail
 
-NAME="cnn"
-HANDLER="${NAME}_train"
+# 🧪 Transformer Turbo (Set Mode) Training Script
+# NOTE: The set-based training loop is still under development.
+#       This script reuses the standard transformer_turbo training handler for now.
+#       Replace HANDLER once the dedicated set trainer is ready.
+
+NAME="transformer_turbo_set"
+BASE_NAME="transformer_turbo"
+HANDLER="${BASE_NAME}_train"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${PROJECT_ROOT}"
@@ -40,9 +46,12 @@ PY
   )
 fi
 
-# Example:
-# captcha-ocr-devkit train --input ./data --output model/model.cnn --handler cnn_train --handler-config cnn_train=handlers/cnn_handler-config.json
-# time captcha-ocr-devkit train --input ./data --handler cnn_train --output model/model.cnn --epochs 200 --batch-size 64 --learning-rate 0.001
+echo "🧪 Starting Transformer Turbo (Set Mode) Training..."
+echo "  • Current workflow reuses transformer_turbo_train handler"
+echo "  • Update HANDLER once the multi-label set trainer is available"
+echo "💾 Model output: ${MODEL_PATH}"
+echo "⚙️ Configuration: ${CONFIG}"
+echo ""
 
 CMD_ARGS=(
   "--input" "./data"
@@ -50,7 +59,16 @@ CMD_ARGS=(
   "--handler" "${HANDLER}"
   "--handler-config" "${HANDLER}=${CONFIG}"
 )
-CMD_ARGS+=("${CONFIG_ARGS[@]}")
+
+if [ ${#CONFIG_ARGS[@]} -gt 0 ]; then
+  CMD_ARGS+=("${CONFIG_ARGS[@]}")
+fi
+
 CMD_ARGS+=("$@")
 
-time captcha-ocr-devkit train "${CMD_ARGS[@]}"
+PYTORCH_ENABLE_MPS_FALLBACK=1 time captcha-ocr-devkit train "${CMD_ARGS[@]}"
+
+echo ""
+echo "✅ Training run finished."
+echo "➡️  Evaluate with: ./scripts/evaluate_transformer_turbo_set.sh"
+echo "➡️  Serve API with: ./scripts/api_transformer_turbo_set.sh"

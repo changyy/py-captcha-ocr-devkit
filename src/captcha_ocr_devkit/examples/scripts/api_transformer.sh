@@ -48,7 +48,12 @@ CMD_ARGS=(
   "--handler-config" "${PREPROCESS_HANDLER}=${CONFIG}"
   "--model" "${MODEL_PATH}"
 )
-CMD_ARGS+=("${CLI_ARGS[@]}")
+
+# Safely append CLI_ARGS if not empty
+if [ ${#CLI_ARGS[@]} -gt 0 ]; then
+  CMD_ARGS+=("${CLI_ARGS[@]}")
+fi
+
 CMD_ARGS+=("$@")
 
 captcha-ocr-devkit api "${CMD_ARGS[@]}"
